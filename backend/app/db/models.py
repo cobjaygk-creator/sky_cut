@@ -34,3 +34,32 @@ class Transcript:
     error_message: str | None
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class Highlight:
+    id: int
+    video_id: int
+    start_time: float
+    end_time: float
+    title: str
+    reason: str
+    content_type: str
+    score: float
+    created_at: str
+
+
+@dataclass(frozen=True)
+class Clip:
+    id: int
+    user_id: int
+    video_id: int
+    highlight_id: int
+    output_path: str | None
+    subtitle_style: str | None
+    subtitle_path: str | None
+    subtitled_output_path: str | None
+    status: str
+    error_message: str | None
+    created_at: str
+    updated_at: str

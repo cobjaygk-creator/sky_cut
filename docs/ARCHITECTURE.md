@@ -2,9 +2,9 @@
 
 ## Goal
 
-New Cut is an AI shorts creation SaaS that starts as a local PC MVP. The current
-milestone provides authentication, protected dashboard access, MP4 upload,
-per-user video lists, and FFmpeg audio extraction structure.
+New Cut is a local-first MVP for an AI shorts creation SaaS. The current system
+supports auth, MP4 upload, per-user video lists, FFmpeg audio extraction wiring,
+OpenAI transcription wiring, and GPT-based highlight recommendation wiring.
 
 ## Current Stack
 
@@ -14,13 +14,9 @@ per-user video lists, and FFmpeg audio extraction structure.
 - Auth: JWT
 - Password hashing: PBKDF2-SHA256 with per-password random salt
 - Storage: Local file storage
-- Video/audio processing: FFmpeg for audio extraction
-
-## Future Stack
-
-- AI: OpenAI API
-- TTS: OpenAI TTS or ElevenLabs-compatible provider structure
-- Billing: Plan and usage-limit structure first, real payment integration later
+- Video/audio processing: FFmpeg
+- AI transcription: OpenAI Audio Transcription API
+- Highlight recommendation: OpenAI GPT API with JSON response parsing
 
 ## High-Level Flow
 
@@ -31,88 +27,99 @@ User browser
   -> SQLite database
   -> Local file storage
   -> FFmpeg audio extraction
-  -> OpenAI transcription in later stages
+  -> OpenAI transcription
+  -> GPT highlight recommendation
 ```
 
-## Auth Flow
+## Main Workflows
+
+Auth:
 
 ```text
-Register
-  -> POST /auth/register
-  -> hash password
-  -> insert user into SQLite users table
+POST /auth/register -> hash password -> insert users row
+POST /auth/login -> verify password -> issue JWT
+GET /me -> verify Bearer token -> load current user
+```
 
-Login
-  -> POST /auth/login
-  -> verify password hash
-  -> issue JWT access token
+Upload:
 
-Current user
-  -> GET /me
-  -> Authorization: Bearer <token>
+```text
+POST /videos/upload
   -> verify JWT
-  -> load user from SQLite
+  -> validate MP4
+  -> save to backend/app/storage/uploads/<user_id>/
+  -> create videos row with status uploaded
 ```
 
-## Video Upload Flow
+Audio extraction:
 
 ```text
-Dashboard upload form
-  -> POST /videos/upload with Bearer token and multipart file
-  -> verify JWT
-  -> validate .mp4 extension and MP4 content type
-  -> enforce MAX_UPLOAD_MB
-  -> save file under backend/app/storage/uploads/<user_id>/
-  -> insert videos row with status uploaded
-  -> show uploaded video in dashboard list
+POST /videos/{video_id}/analyze
+  -> verify ownership
+  -> set extracting_audio
+  -> run FFmpeg
+  -> save WAV to backend/app/storage/temp/<user_id>/
+  -> set audio_extracted or failed
 ```
 
-## Audio Extraction Flow
+Transcription:
 
 ```text
-Dashboard Analyze button
-  -> POST /videos/{video_id}/analyze
-  -> verify JWT and video ownership
-  -> set video status to extracting_audio
-  -> check FFmpeg availability
-  -> extract WAV audio to backend/app/storage/temp/<user_id>/
-  -> set video status to audio_extracted
-
-On FFmpeg error
-  -> set video status to failed
-  -> save error_message on videos row
+GET /videos/{video_id}/transcript
+  -> require extracted audio
+  -> set transcribing
+  -> call OpenAI transcription API
+  -> store text and segment timestamps
+  -> set transcribed or failed
 ```
+
+Highlight recommendation:
+
+```text
+GET /videos/{video_id}/highlights
+  -> require completed transcript
+  -> return cached highlights when present
+  -> otherwise ask GPT for 3-5 JSON highlight candidates
+  -> validate duration 15-60 seconds
+  -> validate/normalize content_type and score
+  -> save highlights rows
+  -> return saved results
+```
+
+Note: `GET /videos/{video_id}/transcript` and `GET /videos/{video_id}/highlights`
+currently have side effects when no cached result exists. This is acceptable for
+the MVP, but later should be split into POST generate endpoints and read-only GET endpoints.
 
 ## Backend Layout
 
 ```text
 backend/app/
-  main.py              FastAPI app entrypoint and router registration
-  api/auth.py          Register and login APIs
-  api/users.py         Current user API
-  api/videos.py        Upload, list, detail, analyze, and status APIs
-  core/config.py       Environment settings
-  core/security.py     Password hashing and JWT helpers
-  db/database.py       SQLite connection, table initialization, local migrations
-  db/models.py         Local model dataclasses
-  db/schemas.py        Pydantic request and response schemas
+  main.py
+  api/auth.py
+  api/users.py
+  api/videos.py
+  core/config.py
+  core/security.py
+  db/database.py
+  db/models.py
+  db/schemas.py
   services/user_service.py
   services/video_service.py
   services/ffmpeg_service.py
+  services/transcription_service.py
+  services/highlight_service.py
 ```
 
 ## Frontend Layout
 
 ```text
 frontend/src/
-  main.tsx             Login, register, dashboard, upload, video list, analyze controls
-  styles.css           Base styling
-  vite-env.d.ts        Vite type declarations
+  main.tsx       Login, register, dashboard, upload, analyze, transcript, highlights UI
+  styles.css     Base styling and dashboard controls
+  vite-env.d.ts  Vite type declarations
 ```
 
 ## Database
-
-Current tables:
 
 ```text
 users
@@ -129,19 +136,35 @@ videos
   storage_path TEXT NOT NULL
   content_type TEXT NOT NULL
   file_size INTEGER NOT NULL
-  status TEXT NOT NULL CHECK (status IN ('uploaded', 'extracting_audio', 'audio_extracted', 'failed'))
+  status TEXT NOT NULL CHECK (status IN ('uploaded', 'extracting_audio', 'audio_extracted', 'transcribing', 'transcribed', 'failed'))
   audio_path TEXT
   error_message TEXT
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+transcripts
+  id INTEGER PRIMARY KEY AUTOINCREMENT
+  video_id INTEGER NOT NULL UNIQUE
+  status TEXT NOT NULL CHECK (status IN ('transcribing', 'transcribed', 'failed'))
+  text TEXT
+  segments_json TEXT NOT NULL DEFAULT '[]'
+  error_message TEXT
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+highlights
+  id INTEGER PRIMARY KEY AUTOINCREMENT
+  video_id INTEGER NOT NULL
+  start_time REAL NOT NULL
+  end_time REAL NOT NULL
+  title TEXT NOT NULL
+  reason TEXT NOT NULL
+  content_type TEXT NOT NULL
+  score REAL NOT NULL
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
 
-## Environment Plan
-
-Backend secrets and local limits are read from `backend/.env`. The committed
-`.env.example` file documents expected variables without exposing real secrets.
-
-Current variables:
+## Environment Variables
 
 ```text
 DATABASE_URL=sqlite:///./new_cut.db
@@ -149,21 +172,22 @@ JWT_SECRET_KEY=change-this-before-production
 JWT_ALGORITHM=HS256
 JWT_EXPIRE_MINUTES=1440
 MAX_UPLOAD_MB=500
+OPENAI_API_KEY=sk-your-real-key
+OPENAI_TRANSCRIPTION_MODEL=whisper-1
+OPENAI_HIGHLIGHT_MODEL=gpt-4o-mini
+TRANSCRIPTION_CHUNK_MB=24
+HIGHLIGHT_MIN_SECONDS=15
+HIGHLIGHT_MAX_SECONDS=60
 ```
 
-## Storage Plan
-
-Local media files are stored below `backend/app/storage/`:
+## Storage
 
 ```text
-uploads/<user_id>/<generated_uuid>.mp4
-temp/<user_id>/<stored_video_filename>.wav
-audio/
-transcripts/
-subtitles/
-outputs/
-tts/
+backend/app/storage/uploads/<user_id>/<generated_uuid>.mp4
+backend/app/storage/temp/<user_id>/<stored_video_filename>.wav
+backend/app/storage/audio/
+backend/app/storage/transcripts/
+backend/app/storage/subtitles/
+backend/app/storage/outputs/
+backend/app/storage/tts/
 ```
-
-These folders are ignored by Git to avoid committing user media or generated
-outputs.

@@ -1,6 +1,8 @@
-﻿import sqlite3
+﻿import re
+import sqlite3
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, UploadFile, status
 
@@ -12,6 +14,7 @@ STORAGE_ROOT = Path(__file__).resolve().parents[1] / "storage"
 UPLOAD_ROOT = STORAGE_ROOT / "uploads"
 TEMP_ROOT = STORAGE_ROOT / "temp"
 ALLOWED_CONTENT_TYPES = {"video/mp4", "application/mp4", "video/x-m4v"}
+YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"}
 
 
 def _row_to_video(row: sqlite3.Row) -> Video:
@@ -59,6 +62,59 @@ def _copy_with_limit(file: UploadFile, destination: Path, max_bytes: int) -> int
     return total
 
 
+def _safe_filename(value: str, fallback: str = "youtube-video") -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9가-힣._ -]+", "", value).strip().strip(".")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    if not cleaned:
+        cleaned = fallback
+    return cleaned[:120]
+
+
+def _validate_youtube_url(url: str) -> str:
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="YouTube URL must start with http:// or https://.")
+    host = parsed.netloc.lower()
+    if host not in YOUTUBE_HOSTS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only YouTube URLs are supported.")
+    return parsed.geturl()
+
+
+def _insert_video_record(
+    conn: sqlite3.Connection,
+    user_id: int,
+    original_filename: str,
+    stored_filename: str,
+    destination: Path,
+    file_size: int,
+) -> Video:
+    cursor = conn.execute(
+        """
+        INSERT INTO videos (
+            user_id, original_filename, stored_filename, storage_path,
+            content_type, file_size, status, audio_path, error_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            original_filename,
+            stored_filename,
+            str(destination),
+            "video/mp4",
+            file_size,
+            "uploaded",
+            None,
+            None,
+        ),
+    )
+    conn.commit()
+
+    video = get_video_for_user(conn, user_id, int(cursor.lastrowid))
+    if video is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Video record creation failed.")
+    return video
+
+
 def create_video(conn: sqlite3.Connection, user_id: int, file: UploadFile) -> Video:
     _validate_mp4(file)
 
@@ -80,31 +136,67 @@ def create_video(conn: sqlite3.Connection, user_id: int, file: UploadFile) -> Vi
     finally:
         file.file.close()
 
-    cursor = conn.execute(
-        """
-        INSERT INTO videos (
-            user_id, original_filename, stored_filename, storage_path,
-            content_type, file_size, status, audio_path, error_message
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            user_id,
-            original_filename,
-            stored_filename,
-            str(destination),
-            file.content_type or "video/mp4",
-            file_size,
-            "uploaded",
-            None,
-            None,
-        ),
-    )
-    conn.commit()
+    return _insert_video_record(conn, user_id, original_filename, stored_filename, destination, file_size)
 
-    video = get_video_for_user(conn, user_id, int(cursor.lastrowid))
-    if video is None:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Video record creation failed.")
-    return video
+
+def import_youtube_video(conn: sqlite3.Connection, user_id: int, youtube_url: str) -> Video:
+    url = _validate_youtube_url(youtube_url)
+    try:
+        from yt_dlp import YoutubeDL
+        from yt_dlp.utils import DownloadError
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="yt-dlp is not installed. Run pip install -r requirements.txt in the backend virtual environment.",
+        ) from exc
+
+    user_dir = UPLOAD_ROOT / str(user_id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    stored_filename = f"{uuid.uuid4().hex}.mp4"
+    destination = user_dir / stored_filename
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+
+    options = {
+        "format": "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+        "merge_output_format": "mp4",
+        "outtmpl": str(destination.with_suffix(".%(ext)s")),
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "retries": 2,
+        "fragment_retries": 2,
+    }
+
+    try:
+        with YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=True)
+    except DownloadError as exc:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"YouTube download failed: {str(exc)[-500:]}") from exc
+    except Exception as exc:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected YouTube import failure.") from exc
+
+    if not destination.exists():
+        candidates = sorted(user_dir.glob(f"{destination.stem}.*"))
+        for candidate in candidates:
+            if candidate.suffix.lower() == ".mp4":
+                candidate.rename(destination)
+                break
+    if not destination.exists():
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Downloaded YouTube video was not saved as MP4.")
+
+    file_size = destination.stat().st_size
+    if file_size > max_bytes:
+        destination.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Downloaded video is too large. Max upload size is {settings.max_upload_mb} MB.",
+        )
+
+    title = _safe_filename(str(info.get("title") or "youtube-video")) if isinstance(info, dict) else "youtube-video"
+    original_filename = f"YouTube - {title}.mp4"
+    return _insert_video_record(conn, user_id, original_filename, stored_filename, destination, file_size)
 
 
 def list_videos_for_user(conn: sqlite3.Connection, user_id: int) -> list[Video]:

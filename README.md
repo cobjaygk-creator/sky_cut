@@ -2,26 +2,34 @@
 
 AI shorts creation SaaS MVP.
 
-The current stage includes:
+Current capabilities:
 
 - FastAPI backend with health check
-- SQLite users and videos tables
+- SQLite users, videos, transcripts, highlights, and clips tables
 - Register, login, and current-user APIs
 - JWT authentication
 - Auth-protected MP4 upload
+- YouTube URL import with yt-dlp
 - My video list and video detail APIs
-- FFmpeg-based audio extraction structure
-- Video analysis start and status APIs
+- FFmpeg-based audio extraction
+- OpenAI Transcription API integration structure
+- Timestamped transcript storage
+- GPT-based shorts highlight recommendation structure
+- Highlight-based 9:16 vertical clip generation
+- ASS subtitle file generation and FFmpeg subtitle burn-in
+- Authenticated clip download
 - React + Vite + TypeScript frontend
-- Login, register, dashboard, upload, my video list, and analyze controls
+- Login, register, dashboard, upload, YouTube import, analyze, transcript, highlights, clip, subtitle style, and download controls
 
-OpenAI API calls, transcription, shorts generation, TTS, and usage plans are not implemented yet.
+TTS, title/description/hashtag generation, billing, and usage plans are not implemented yet.
 
 ## Requirements
 
 - Node.js 20 or newer
 - Python 3.11 or newer
-- FFmpeg for audio extraction
+- FFmpeg for audio extraction, YouTube MP4 merging, vertical clip rendering, and subtitle burn-in
+- yt-dlp for YouTube URL import
+- OpenAI API key for transcription and highlight recommendation
 
 On this PC, use `npm.cmd` because PowerShell may block `npm.ps1`.
 
@@ -29,32 +37,18 @@ On this PC, use `npm.cmd` because PowerShell may block `npm.ps1`.
 
 ```powershell
 cd C:\Users\stkim\Documents\Codex\new_cut\backend
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-If you need to recreate the backend environment:
-
-```powershell
-cd C:\Users\stkim\Documents\Codex\new_cut\backend
-C:\Users\stkim\AppData\Local\Programs\Python\Python312\python.exe -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-```
-
-Backend health check:
+Backend URLs:
 
 ```text
-http://127.0.0.1:8000/health
-```
-
-API docs:
-
-```text
-http://127.0.0.1:8000/docs
+Health: http://127.0.0.1:8000/health
+API docs: http://127.0.0.1:8000/docs
 ```
 
 ## Frontend Setup
-
-Open a second terminal:
 
 ```powershell
 cd C:\Users\stkim\Documents\Codex\new_cut\frontend
@@ -68,43 +62,81 @@ Frontend URL:
 http://127.0.0.1:5173
 ```
 
-## FFmpeg Setup
-
-FFmpeg must be installed and available in PATH before audio extraction can work.
-
-Check installation:
-
-```powershell
-ffmpeg -version
-```
-
-Install with winget:
-
-```powershell
-winget install --id Gyan.FFmpeg --source winget
-```
-
-After installation, close and reopen the terminal, then run `ffmpeg -version` again.
-
-If FFmpeg is missing, `POST /videos/{video_id}/analyze` will mark the video as
-`failed` and save the error message in the database.
-
 ## Environment Variables
 
-Backend environment variables are stored in `backend/.env`. The file is ignored
+Backend environment variables are stored in `backend/.env`. This file is ignored
 by Git. Use `.env.example` as the reference.
 
-Important variables:
-
 ```text
+APP_ENV=local
+APP_NAME=New Cut
 DATABASE_URL=sqlite:///./new_cut.db
 JWT_SECRET_KEY=change-this-before-production
 JWT_ALGORITHM=HS256
 JWT_EXPIRE_MINUTES=1440
 MAX_UPLOAD_MB=500
+OPENAI_API_KEY=sk-your-real-key
+OPENAI_TRANSCRIPTION_MODEL=whisper-1
+OPENAI_HIGHLIGHT_MODEL=gpt-4o-mini
+TRANSCRIPTION_CHUNK_MB=24
+HIGHLIGHT_MIN_SECONDS=15
+HIGHLIGHT_MAX_SECONDS=60
 ```
 
-## Auth APIs
+Do not put a real OpenAI API key in code. Put it only in `backend/.env`.
+
+## FFmpeg Setup
+
+```powershell
+winget install --id Gyan.FFmpeg --source winget
+ffmpeg -version
+```
+
+After installing FFmpeg, restart the terminal before running the backend again.
+
+## YouTube URL Import
+
+The dashboard supports importing a YouTube URL into the same local video library
+used by MP4 uploads. After importing, use the normal flow: `Analyze` ->
+`Transcript` -> `Highlights` -> `Create clip` -> `Burn subtitles` -> `Download`.
+
+Use this only for videos you own, videos you created, or videos you have
+permission to process. Some YouTube videos may fail because of access
+restrictions, region limits, age checks, live streams, private videos, or
+YouTube download changes.
+
+Backend dependency:
+
+```powershell
+cd C:\Users\stkim\Documents\Codex\new_cut\backend
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+## Korean Subtitle Font Notes
+
+Subtitle burn-in uses ASS subtitles with the `Malgun Gothic` font name. On Korean
+Windows this font is usually already installed. If Korean subtitles appear as
+boxes or broken characters:
+
+1. Confirm Windows has `Malgun Gothic` installed.
+2. Confirm FFmpeg was installed with `libass` subtitle support. The Gyan FFmpeg
+   build installed by `winget install --id Gyan.FFmpeg --source winget` usually
+   includes it.
+3. Restart the backend after installing FFmpeg or fonts.
+4. Keep generated `.ass` files encoded as UTF-8. The app writes them as UTF-8
+   with BOM to help FFmpeg detect Korean text correctly.
+
+The current MVP supports three subtitle styles:
+
+```text
+basic
+bold
+shorts
+```
+
+## APIs
+
+Auth:
 
 ```text
 POST /auth/register
@@ -112,23 +144,29 @@ POST /auth/login
 GET /me
 ```
 
-`GET /me` requires:
-
-```text
-Authorization: Bearer <access_token>
-```
-
-## Video APIs
+Videos:
 
 ```text
 POST /videos/upload
+POST /videos/import-youtube
 GET /videos
 GET /videos/{video_id}
 POST /videos/{video_id}/analyze
 GET /videos/{video_id}/status
+GET /videos/{video_id}/transcript
+GET /videos/{video_id}/highlights
 ```
 
-All video APIs require:
+Clips:
+
+```text
+POST /clips/create
+POST /clips/{clip_id}/subtitles
+GET /clips/{clip_id}
+GET /clips/{clip_id}/download
+```
+
+All video and clip APIs require:
 
 ```text
 Authorization: Bearer <access_token>
@@ -140,25 +178,22 @@ Current video statuses:
 uploaded
 extracting_audio
 audio_extracted
+transcribing
+transcribed
 failed
 ```
 
-Extracted audio is saved under:
+Current clip statuses:
 
 ```text
-backend/app/storage/temp/<user_id>/<stored_video_filename>.wav
+pending
+processing
+completed
+failed
 ```
-
-## Verified In Stage 4
-
-- Frontend build passed with `npm.cmd run build`
-- Backend compile check passed
-- Backend health check returned `status: ok`
-- `GET /videos/{video_id}/status` returned the current video status
-- `POST /videos/{video_id}/analyze` handles missing FFmpeg by setting `failed`
-- FFmpeg missing error message is stored and returned by status API
 
 ## Current Stage
 
-Stage 4 is complete. See `docs/PROJECT_STATUS.md` for completed items and the
-next development step.
+Stage 8 implementation is complete, with an additional YouTube URL import path
+added. Real YouTube import and subtitle burn-in should be tested with a public
+or authorized YouTube URL, FFmpeg, and a real OpenAI API key.
