@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.db
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Environment
+.env
+
+# Local media outputs
+backend/app/storage/uploads/
+backend/app/storage/audio/
+backend/app/storage/transcripts/
+backend/app/storage/subtitles/
+backend/app/storage/outputs/
+backend/app/storage/tts/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+backend/app/storage/temp/
