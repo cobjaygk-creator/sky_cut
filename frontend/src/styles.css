@@ -301,3 +301,23 @@ input:focus {
     flex-basis: auto;
   }
 }
+
+.status-transcribing {
+  color: #6a4a00;
+  background: #fff1bf;
+}
+
+.status-transcribed {
+  color: #244f85;
+  background: #e5f0ff;
+}
+
+.transcript-preview {
+  display: -webkit-box;
+  max-width: 100%;
+  margin-top: 8px;
+  overflow: hidden;
+  color: #26343d !important;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}

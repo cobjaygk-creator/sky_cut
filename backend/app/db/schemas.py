@@ -41,3 +41,21 @@ class VideoStatusResponse(BaseModel):
     audio_path: str | None = None
     error_message: str | None = None
     updated_at: str
+
+
+class TranscriptSegmentResponse(BaseModel):
+    index: int
+    start: float
+    end: float
+    text: str
+
+
+class TranscriptResponse(BaseModel):
+    id: int
+    video_id: int
+    status: str
+    text: str | None = None
+    segments: list[TranscriptSegmentResponse] = []
+    error_message: str | None = None
+    created_at: str
+    updated_at: str

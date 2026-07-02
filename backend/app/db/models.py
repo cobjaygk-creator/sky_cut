@@ -22,3 +22,15 @@ class Video:
     error_message: str | None
     created_at: str
     updated_at: str
+
+
+@dataclass(frozen=True)
+class Transcript:
+    id: int
+    video_id: int
+    status: str
+    text: str | None
+    segments_json: str
+    error_message: str | None
+    created_at: str
+    updated_at: str

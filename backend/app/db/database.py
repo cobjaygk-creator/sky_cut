@@ -14,7 +14,8 @@ def _sqlite_path() -> Path:
 
 
 DATABASE_PATH = _sqlite_path()
-VIDEO_STATUSES = "'uploaded', 'extracting_audio', 'audio_extracted', 'failed'"
+VIDEO_STATUSES = "'uploaded', 'extracting_audio', 'audio_extracted', 'transcribing', 'transcribed', 'failed'"
+TRANSCRIPT_STATUSES = "'transcribing', 'transcribed', 'failed'"
 
 
 def get_connection() -> Generator[sqlite3.Connection, None, None]:
@@ -55,7 +56,12 @@ def _migrate_videos_table(conn: sqlite3.Connection) -> None:
         return
 
     table_sql = row["sql"] or ""
-    needs_rebuild = "extracting_audio" not in table_sql or "audio_path" not in table_sql or "error_message" not in table_sql
+    needs_rebuild = (
+        "transcribing" not in table_sql
+        or "transcribed" not in table_sql
+        or "audio_path" not in table_sql
+        or "error_message" not in table_sql
+    )
     if not needs_rebuild:
         return
 
@@ -70,12 +76,36 @@ def _migrate_videos_table(conn: sqlite3.Connection) -> None:
         SELECT
             id, user_id, original_filename, stored_filename, storage_path,
             content_type, file_size,
-            CASE WHEN status IN ('uploaded', 'failed') THEN status ELSE 'failed' END,
-            NULL, NULL, created_at, created_at
+            CASE
+                WHEN status IN ('uploaded', 'extracting_audio', 'audio_extracted', 'transcribing', 'transcribed', 'failed') THEN status
+                ELSE 'failed'
+            END,
+            CASE WHEN audio_path IS NULL THEN NULL ELSE audio_path END,
+            CASE WHEN error_message IS NULL THEN NULL ELSE error_message END,
+            created_at,
+            CASE WHEN updated_at IS NULL THEN created_at ELSE updated_at END
         FROM videos_old
         """
     )
     conn.execute("DROP TABLE videos_old")
+
+
+def _create_transcripts_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS transcripts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            video_id INTEGER NOT NULL UNIQUE,
+            status TEXT NOT NULL CHECK (status IN ({TRANSCRIPT_STATUSES})),
+            text TEXT,
+            segments_json TEXT NOT NULL DEFAULT '[]',
+            error_message TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (video_id) REFERENCES videos (id)
+        )
+        """
+    )
 
 
 def init_db() -> None:
@@ -93,4 +123,5 @@ def init_db() -> None:
             """
         )
         _migrate_videos_table(conn)
+        _create_transcripts_table(conn)
         conn.commit()

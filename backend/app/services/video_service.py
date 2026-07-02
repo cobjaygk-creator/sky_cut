@@ -144,7 +144,7 @@ def update_video_status(
     conn.execute(
         """
         UPDATE videos
-        SET status = ?, audio_path = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP
+        SET status = ?, audio_path = COALESCE(?, audio_path), error_message = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
         (status_value, audio_path, error_message, video_id),
@@ -156,7 +156,7 @@ def analyze_video_audio(conn: sqlite3.Connection, user_id: int, video_id: int) -
     video = get_video_for_user(conn, user_id, video_id)
     if video is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found.")
-    if video.status not in {"uploaded", "failed", "audio_extracted"}:
+    if video.status not in {"uploaded", "failed", "audio_extracted", "transcribed"}:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Video is currently {video.status}.")
 
     audio_dir = TEMP_ROOT / str(user_id)

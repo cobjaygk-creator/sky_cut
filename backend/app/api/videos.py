@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from app.api.users import get_current_user
 from app.db.database import get_connection
 from app.db.models import User
-from app.db.schemas import VideoResponse, VideoStatusResponse
+from app.db.schemas import TranscriptResponse, TranscriptSegmentResponse, VideoResponse, VideoStatusResponse
+from app.services.transcription_service import transcript_segments, transcribe_video
 from app.services.video_service import analyze_video_audio, create_video, get_video_for_user, list_videos_for_user
 
 router = APIRouter(prefix="/videos", tags=["videos"])
@@ -33,6 +34,20 @@ def _to_status_response(video) -> VideoStatusResponse:
         audio_path=video.audio_path,
         error_message=video.error_message,
         updated_at=video.updated_at,
+    )
+
+
+def _to_transcript_response(transcript) -> TranscriptResponse:
+    segments = [TranscriptSegmentResponse(**segment) for segment in transcript_segments(transcript)]
+    return TranscriptResponse(
+        id=transcript.id,
+        video_id=transcript.video_id,
+        status=transcript.status,
+        text=transcript.text,
+        segments=segments,
+        error_message=transcript.error_message,
+        created_at=transcript.created_at,
+        updated_at=transcript.updated_at,
     )
 
 
@@ -86,3 +101,13 @@ def read_video_status(
     if video is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found.")
     return _to_status_response(video)
+
+
+@router.get("/{video_id}/transcript", response_model=TranscriptResponse)
+def read_video_transcript(
+    video_id: int,
+    current_user: User = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(get_connection),
+) -> TranscriptResponse:
+    transcript = transcribe_video(conn, current_user.id, video_id)
+    return _to_transcript_response(transcript)
