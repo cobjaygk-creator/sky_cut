@@ -160,6 +160,8 @@ class BlogClipResponse(BaseModel):
     video_path: str | None = None
     subtitled_video_path: str | None = None
     status: str
+    progress_stage: str = "queued"
+    progress_percent: int = 0
     error_message: str | None = None
     title_candidates: list[str] = []
     description: str | None = None

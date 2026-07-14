@@ -1,13 +1,15 @@
 ﻿# Project Status
 
 Last updated: 2026-07-14
-Project root: `C:\Users\stkim\Documents\Codex\new_cut`
+Project root: `C:\Users\stkim\Documents\Codex\new_cut` (branch `sky_cut` — see
+"Branching" below)
 
 ## Current Stage
 
-**Stage 14: Blog-clip pipeline discovered and documented — complete.**
+**Stage 16: Source expansion (generic blog/URL scraping) — complete.**
 
-All 13 planned stages of the original local MVP are implemented:
+All 13 planned stages of the original local MVP are implemented, plus three
+follow-up stages on the blog-clip pipeline:
 
 ```text
 Stage  0  Architecture/folder plan (no code)
@@ -24,9 +26,121 @@ Stage 10  AI upload metadata: titles/description/hashtags + copy buttons
 Stage 11  OpenAI TTS narration mode and narration MP4 output
 Stage 12  Free/Lite/Pro plans, monthly usage limits, max video duration
 Stage 13  Full review: bug fixes, full doc set (this file + 4 others)
-Stage 14  This entry: documented the blog-clip pipeline (built after Stage 13
-          but never recorded in these docs), cleaned up dead code
+Stage 14  Documented the blog-clip pipeline (built after Stage 13 but never
+          recorded in these docs), cleaned up dead code
+Stage 15  Async blog-clip processing: POST /blog-clips now returns in well
+          under a second instead of blocking for up to a minute; the
+          scrape/GPT/TTS/FFmpeg pipeline runs as a FastAPI background task
+          and the frontend polls progress. See "Stage 15 details" below.
+Stage 16  Source expansion: any blog/article URL is now accepted, not just
+          blog.naver.com. See "Stage 16 details" below.
 ```
+
+## Branching
+
+- `main` — frozen at the Stage 14 "1차 완료" demo snapshot (also tagged
+  `v1-demo`). Do not commit here; it exists so a known-working demo is
+  always available at `C:\Users\stkim\Documents\Codex\new_cut-demo` (a
+  separate `git worktree` checked out to `main`, with its own copies of
+  `.venv`, `.env`, `new_cut.db`, and `node_modules` so it runs standalone).
+- `sky_cut` — active development branch (this folder). All Stage 15+ roadmap
+  work happens here. Merge back to `main` only when explicitly decided.
+
+### Stage 16 details: source expansion beyond blog.naver.com
+
+`backend/app/services/blog_service.py` previously had a hard `if
+"blog.naver.com" not in url: raise 400` check, so any other blog/article URL
+was rejected outright. This stage replaces that with a dispatcher:
+
+- `fetch_blog_content(url)` checks the URL's host (`_is_naver_blog_url`) and
+  routes to either the existing Naver-specific parser
+  (`fetch_naver_blog_content`, unchanged — still targets
+  `div.se-main-container` / `.se-text-paragraph` exactly) or the new
+  `fetch_generic_blog_content(url)` for everything else.
+- `fetch_generic_blog_content` strips non-content tags (`script`, `style`,
+  `nav`, `header`, `footer`, `aside`, `form`, `iframe`, `button`, `svg`), then
+  tries a prioritized list of container selectors covering common platforms
+  (`article`, `[role=main]`, `main`, `.entry-content`, `.post-content`,
+  Tistory/Velog-style classes, etc.). If none of those match (or match too
+  little text), it falls back to "the `<div>` with the most visible text on
+  the page" — a simple but effective heuristic for unfamiliar layouts.
+- Title extraction tries `og:title` -> `<title>` -> first `<h1>` -> a Korean
+  placeholder, in that order.
+- Image extraction (`_extract_image_urls`, shared by both the Naver and
+  generic paths) now resolves relative `src`/`data-src`/`data-lazy-src`/
+  `data-original` attributes against the page URL with `urljoin`, since
+  non-Naver sites commonly use root-relative or lazy-loaded image paths
+  (Naver's CDN URLs are already absolute, so this is a no-op there). If the
+  content container alone doesn't have enough images
+  (`blog_image_min_count`), the search widens to the whole page as a
+  fallback (e.g. a hero image rendered outside the article body).
+- No API or database changes — `POST /blog-clips` still accepts any
+  `HttpUrl` (Pydantic already allowed this; the restriction was enforced
+  deep inside the pipeline, not at the API boundary), and a non-Naver URL
+  that fails to scrape still surfaces as a `failed` blog clip with a Korean
+  `error_message`, exactly like any other pipeline failure.
+- Frontend copy updated: the blog form label/placeholder/helper text no
+  longer says "네이버 블로그 URL" / "네이버 블로그 글만 지원" — now "블로그/글
+  URL" with a note that Naver, Tistory, brunch, etc. are all supported.
+- Verified end-to-end against a live non-Naver URL
+  (`https://en.wikipedia.org/wiki/Short_film`): the pipeline correctly
+  extracted the page title, scraped body text, generated a Korean narration
+  script via GPT, synthesized TTS, rendered the slideshow, and completed
+  with a working `video_path`/`subtitled_video_path` — the exact same
+  progress-checkpoint flow as a Naver post from Stage 15.
+
+Not in scope for Stage 16: the generic extractor is a best-effort heuristic,
+not a true "reader mode" (e.g. Mozilla Readability). Pages that are heavily
+JavaScript-rendered (content injected client-side with no server-rendered
+HTML) will not scrape correctly since `requests` only fetches the initial
+HTML. Sites that block scraping (paywall, bot detection, robots.txt) will
+surface as a `failed` blog clip with an HTTP-error message, same as before.
+
+### Stage 15 details: async processing
+
+`POST /blog-clips` previously ran the entire scrape -> download images ->
+GPT script -> OpenAI TTS -> FFmpeg slideshow -> subtitle burn-in pipeline
+synchronously inside one HTTP request (up to ~1 minute). This was the #1
+item in the Stage 14 roadmap ("Known Gaps") because every later blog-clip
+feature (scene editing, multi-voice TTS, templates, etc.) needs a working
+async/progress foundation first.
+
+What changed:
+
+- `blog_clips` gained two columns: `progress_stage` (a short machine-readable
+  stage name) and `progress_percent` (0-100). Existing rows were
+  backfilled (`completed` -> `done`/100) by a migration in `database.py`.
+- `backend/app/services/blog_service.py` is split into `create_blog_clip_job()`
+  (fast: validates the style, inserts a `pending`/`queued`/0% row, returns
+  immediately) and `run_blog_clip_pipeline()` (the actual multi-step work,
+  called via FastAPI's `BackgroundTasks` so it runs after the HTTP response
+  is already sent). The pipeline function opens its own SQLite connection
+  (the request-scoped one is already closed by the time a background task
+  runs) and updates `progress_stage`/`progress_percent` at 7 checkpoints:
+  `queued(0) -> scraping(10) -> downloading_images(25) ->
+  generating_script(40) -> synthesizing_audio(55) -> rendering_video(75) ->
+  burning_subtitles(90) -> done(100)`.
+- `frontend/src/main.tsx`: `POST /blog-clips` now just adds the `pending` row
+  to the list and starts a 2-second polling interval (`pollBlogClip()`)
+  against `GET /blog-clips/{id}` until the row reaches `completed` or
+  `failed`. `loadBlogClips()` also resumes polling for any rows that were
+  still `pending`/`processing` from a previous session (e.g. after a page
+  reload). `BlogClipCard` renders a progress bar + Korean stage label
+  (`BLOG_PROGRESS_STAGE_LABELS`) while a clip is in progress.
+- Verified end-to-end against the live OpenAI API: `POST /blog-clips`
+  returned in ~79ms with `status: "pending"`, and polling `GET
+  /blog-clips/{id}` showed real stage transitions
+  (`synthesizing_audio(55%) -> rendering_video(75%) -> completed/done(100%)`)
+  before the video finished rendering, then the completed row had a working
+  `video_path`/`subtitled_video_path` exactly as before this change.
+
+Not in scope for Stage 15 (still true after this stage, unchanged from the
+Stage 14 roadmap): no retry endpoint for a `failed` blog clip (the user just
+submits the URL again, creating a new row), no cancel-in-progress action,
+and progress is still per-blog_clip in the same SQLite table (no separate
+job-queue table/worker process — this remains an in-process background task,
+which is enough for a single local server but would need Celery/RQ-style
+infrastructure for multi-worker/multi-machine deployments).
 
 Real payment integration is still intentionally not implemented (by design,
 see original plan). YouTube URL import (`yt-dlp`) was added alongside Stage 3
@@ -202,10 +316,10 @@ frontend build, specifically looking for defects before calling the MVP done.
 
 ### Known gaps in the blog-clip feature (see "Roadmap" below for the plan)
 
-- `POST /blog-clips` is fully synchronous — no background job queue, no
-  progress percentage, and the HTTP request stays open for the entire
-  scrape+GPT+TTS+FFmpeg pipeline.
-- Only `blog.naver.com` URLs are supported; no generic blog/URL parser.
+- Generic (non-Naver) scraping is a best-effort heuristic (common container
+  selectors + "biggest `<div>` by text" fallback), not a true reader-mode
+  parser — it can still fail on heavily JS-rendered pages or sites that
+  block scraping.
 - Only one narration tone/script is generated per post (no
   summary/hook/detailed choice).
 - Only one fixed TTS voice; no voice catalog, speed control, or per-scene
@@ -292,9 +406,11 @@ user can, entirely through the local web UI:
    them with one click.
 10. Download the final rendered MP4.
 11. See their current plan, monthly usage, and remaining quota at any time.
-12. Paste a `blog.naver.com` post URL and, in one request, get back a
-    narrated 1080x1920 slideshow video with burned-in captions, then
-    optionally generate title/description/hashtags for it and download it.
+12. Paste a blog/article URL (Naver blog, Tistory, brunch, or most other
+    blogs/news pages) and, after a short async processing step with a live
+    progress bar, get back a narrated 1080x1920 slideshow video with
+    burned-in captions, then optionally generate title/description/hashtags
+    for it and download it.
 
 This is a genuinely complete MVP loop for a single local user. It is not yet
 a deployable multi-user product — see `docs/DEPLOYMENT.md` for the gap
@@ -315,9 +431,9 @@ between "runs on my PC" and "runs as a real hosted service."
 4. When ready to support more than one concurrent real user, read
    `docs/DEPLOYMENT.md` and plan the database/storage/queueing migration
    before adding a payment provider.
-5. Start the "Roadmap: Blog Clips -> SuperShorts-Level Product" below at
-   Stage 15 (async processing) — it is the foundation the rest of that
-   roadmap depends on.
+5. Continue the "Roadmap: Blog Clips -> SuperShorts-Level Product" below at
+   Stage 17 (script tone choice) — Stages 15 (async processing) and 16
+   (source expansion) are both done.
 
 ## Roadmap: Blog Clips -> SuperShorts-Level Product
 
@@ -331,10 +447,11 @@ already share. Stages are ordered so that the riskiest foundational work
 that depends on it.
 
 ```text
-Stage 15  Async processing: POST /blog-clips returns immediately (pending),
-          the pipeline runs in the background, frontend polls status/progress.
-          Prerequisite for every later stage below — do this first.
-Stage 16  Source expansion: generic blog/URL scraping beyond blog.naver.com.
+Stage 15  DONE (2026-07-14). Async processing: POST /blog-clips returns
+          immediately (pending), the pipeline runs in the background,
+          frontend polls status/progress. See "Stage 15 details" above.
+Stage 16  DONE (2026-07-14). Source expansion: generic blog/URL scraping
+          beyond blog.naver.com. See "Stage 16 details" above.
 Stage 17  Script tone choice: generate summary/hook-driven/detailed script
           candidates and let the user pick one (currently only one script).
 Stage 18  Scene/board data model: replace "one row per generated video" with

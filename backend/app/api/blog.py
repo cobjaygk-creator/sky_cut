@@ -1,6 +1,6 @@
 import sqlite3
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
 from app.api.users import get_current_user
@@ -11,10 +11,11 @@ from app.services.blog_service import (
     blog_clip_download_path,
     blog_clip_hashtags,
     blog_clip_title_candidates,
-    create_blog_short,
+    create_blog_clip_job,
     get_blog_clip_for_user,
     get_or_create_blog_metadata,
     list_blog_clips_for_user,
+    run_blog_clip_pipeline,
 )
 
 router = APIRouter(prefix="/blog-clips", tags=["blog-clips"])
@@ -30,6 +31,8 @@ def _to_blog_clip_response(blog_clip: BlogClip) -> BlogClipResponse:
         video_path=blog_clip.video_path,
         subtitled_video_path=blog_clip.subtitled_video_path,
         status=blog_clip.status,
+        progress_stage=blog_clip.progress_stage,
+        progress_percent=blog_clip.progress_percent,
         error_message=blog_clip.error_message,
         title_candidates=blog_clip_title_candidates(blog_clip),
         description=blog_clip.description,
@@ -43,10 +46,13 @@ def _to_blog_clip_response(blog_clip: BlogClip) -> BlogClipResponse:
 @router.post("", response_model=BlogClipResponse, status_code=201)
 def create_blog_clip(
     request: BlogClipCreateRequest,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     conn: sqlite3.Connection = Depends(get_connection),
 ) -> BlogClipResponse:
-    blog_clip = create_blog_short(conn, current_user.id, str(request.url), request.style)
+    url = str(request.url)
+    blog_clip = create_blog_clip_job(conn, current_user.id, url, request.style)
+    background_tasks.add_task(run_blog_clip_pipeline, blog_clip.id, current_user.id, url, request.style)
     return _to_blog_clip_response(blog_clip)
 
 

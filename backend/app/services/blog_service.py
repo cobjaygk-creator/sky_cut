@@ -5,13 +5,16 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
+from bs4.element import Tag
 from fastapi import HTTPException, status
 from openai import APIConnectionError, APIStatusError, OpenAI, OpenAIError, RateLimitError
 
 from app.core.config import settings
+from app.db.database import get_connection
 from app.db.models import BlogClip
 from app.services.ffmpeg_service import (
     FFmpegNotAvailableError,
@@ -33,6 +36,16 @@ BLOG_SUBTITLE_ROOT = BLOG_ROOT / "subtitles"
 
 ALLOWED_SUBTITLE_STYLES = {"basic", "bold", "shorts"}
 
+# (status, progress_stage, progress_percent) checkpoints the pipeline moves through.
+PROGRESS_QUEUED = ("pending", "queued", 0)
+PROGRESS_SCRAPING = ("processing", "scraping", 10)
+PROGRESS_DOWNLOADING_IMAGES = ("processing", "downloading_images", 25)
+PROGRESS_GENERATING_SCRIPT = ("processing", "generating_script", 40)
+PROGRESS_SYNTHESIZING_AUDIO = ("processing", "synthesizing_audio", 55)
+PROGRESS_RENDERING_VIDEO = ("processing", "rendering_video", 75)
+PROGRESS_BURNING_SUBTITLES = ("processing", "burning_subtitles", 90)
+PROGRESS_DONE = ("completed", "done", 100)
+
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -46,6 +59,31 @@ _CONTENT_TYPE_EXTENSIONS = {
     "image/gif": ".gif",
     "image/webp": ".webp",
 }
+
+# Checked in order; the first selector that matches a container with a
+# reasonable amount of text wins. Covers common Korean/global blogging
+# platforms (Tistory, Velog, brunch, WordPress, Medium, generic news CMSs)
+# plus a few framework-agnostic conventions (<article>, [role=main]).
+_GENERIC_CONTENT_SELECTORS = [
+    "article",
+    "[role='main']",
+    "main",
+    ".entry-content",
+    ".post-content",
+    ".article-content",
+    ".article_view",
+    ".article-view",
+    "#article-view",
+    ".tt_article_useless_p_margin",  # Tistory
+    ".sc-b3ea8b5a-0",  # Velog (best-effort; class names are hashed and may drift)
+    ".se-main-container",  # Naver, kept as a generic fallback too
+    "#content",
+    ".content",
+    ".post",
+    ".post-area",
+]
+_GENERIC_MIN_CONTAINER_TEXT_LENGTH = 80
+_REMOVE_TAG_NAMES = ["script", "style", "noscript", "nav", "header", "footer", "aside", "form", "iframe", "button", "svg"]
 
 
 class BlogFetchError(RuntimeError):
@@ -70,6 +108,8 @@ def _row_to_blog_clip(row: sqlite3.Row) -> BlogClip:
         video_path=row["video_path"],
         subtitled_video_path=row["subtitled_video_path"],
         status=row["status"],
+        progress_stage=row["progress_stage"],
+        progress_percent=row["progress_percent"],
         error_message=row["error_message"],
         title_candidates_json=row["title_candidates_json"],
         description=row["description"],
@@ -80,16 +120,17 @@ def _row_to_blog_clip(row: sqlite3.Row) -> BlogClip:
     )
 
 
+_BLOG_CLIP_COLUMNS = """
+    id, user_id, source_url, blog_title, narration_script, subtitle_style,
+    video_path, subtitled_video_path, status, progress_stage, progress_percent,
+    error_message, title_candidates_json, description, hashtags_json, metadata_error,
+    created_at, updated_at
+"""
+
+
 def get_blog_clip_for_user(conn: sqlite3.Connection, user_id: int, blog_clip_id: int) -> BlogClip | None:
     row = conn.execute(
-        """
-        SELECT id, user_id, source_url, blog_title, narration_script, subtitle_style,
-               video_path, subtitled_video_path, status, error_message,
-               title_candidates_json, description, hashtags_json, metadata_error,
-               created_at, updated_at
-        FROM blog_clips
-        WHERE id = ? AND user_id = ?
-        """,
+        f"SELECT {_BLOG_CLIP_COLUMNS} FROM blog_clips WHERE id = ? AND user_id = ?",
         (blog_clip_id, user_id),
     ).fetchone()
     return _row_to_blog_clip(row) if row else None
@@ -97,15 +138,7 @@ def get_blog_clip_for_user(conn: sqlite3.Connection, user_id: int, blog_clip_id:
 
 def list_blog_clips_for_user(conn: sqlite3.Connection, user_id: int) -> list[BlogClip]:
     rows = conn.execute(
-        """
-        SELECT id, user_id, source_url, blog_title, narration_script, subtitle_style,
-               video_path, subtitled_video_path, status, error_message,
-               title_candidates_json, description, hashtags_json, metadata_error,
-               created_at, updated_at
-        FROM blog_clips
-        WHERE user_id = ?
-        ORDER BY created_at DESC
-        """,
+        f"SELECT {_BLOG_CLIP_COLUMNS} FROM blog_clips WHERE user_id = ? ORDER BY created_at DESC",
         (user_id,),
     ).fetchall()
     return [_row_to_blog_clip(row) for row in rows]
@@ -121,13 +154,30 @@ def blog_clip_download_path(blog_clip: BlogClip) -> Path:
     return path
 
 
-# --- Naver blog scraping -----------------------------------------------------
+# --- Blog scraping ------------------------------------------------------------
+
+
+def _is_naver_blog_url(url: str) -> bool:
+    return "blog.naver.com" in urlparse(url).netloc
+
+
+def _resolve_image_src(img: Tag, base_url: str) -> str | None:
+    src = img.get("data-lazy-src") or img.get("data-src") or img.get("data-original") or img.get("src")
+    if not src or src.startswith("data:"):
+        return None
+    return urljoin(base_url, src)
+
+
+def _extract_image_urls(container: Tag, base_url: str) -> list[str]:
+    image_urls: list[str] = []
+    for img in container.find_all("img"):
+        resolved = _resolve_image_src(img, base_url)
+        if resolved and resolved not in image_urls:
+            image_urls.append(resolved)
+    return image_urls
 
 
 def _parse_naver_blog_ids(url: str) -> tuple[str, str]:
-    if "blog.naver.com" not in url:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="네이버 블로그(blog.naver.com) URL만 지원합니다.")
-
     blog_id_match = re.search(r"blogId=([^&]+)", url)
     log_no_match = re.search(r"logNo=([0-9]+)", url)
     if blog_id_match and log_no_match:
@@ -189,17 +239,95 @@ def fetch_naver_blog_content(url: str) -> BlogContent:
     if not text:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="블로그 본문 텍스트를 추출하지 못했습니다.")
 
-    image_urls: list[str] = []
-    for img in container.find_all("img"):
-        src = img.get("data-lazy-src") or img.get("data-src") or img.get("src")
-        if not src or src.startswith("data:"):
-            continue
-        if src.startswith("//"):
-            src = f"https:{src}"
-        if src not in image_urls:
-            image_urls.append(src)
+    image_urls = _extract_image_urls(container, url)
+    return BlogContent(title=title, text=text[:6000], image_urls=image_urls)
+
+
+def _strip_noise_tags(soup: BeautifulSoup) -> None:
+    for tag in soup.find_all(_REMOVE_TAG_NAMES):
+        tag.decompose()
+
+
+def _extract_generic_title(soup: BeautifulSoup) -> str:
+    og_title = soup.select_one('meta[property="og:title"]')
+    if og_title and og_title.get("content"):
+        return clean_subtitle_text(og_title["content"])
+    if soup.title and soup.title.string:
+        return clean_subtitle_text(soup.title.string)
+    h1 = soup.find("h1")
+    if h1 is not None:
+        return clean_subtitle_text(h1.get_text(" "))
+    return "블로그 글"
+
+
+def _find_generic_content_container(soup: BeautifulSoup) -> Tag:
+    for selector in _GENERIC_CONTENT_SELECTORS:
+        container = soup.select_one(selector)
+        if container is not None and len(container.get_text(strip=True)) >= _GENERIC_MIN_CONTAINER_TEXT_LENGTH:
+            return container
+
+    # No known platform container matched (or it was too short) — fall back
+    # to the <div> with the most text, which works reasonably well for
+    # unfamiliar blogging platforms and simple article pages.
+    best_container: Tag | None = None
+    best_length = 0
+    for candidate in soup.find_all("div"):
+        text_length = len(candidate.get_text(strip=True))
+        if text_length > best_length:
+            best_container = candidate
+            best_length = text_length
+    return best_container or soup.body or soup
+
+
+def fetch_generic_blog_content(url: str) -> BlogContent:
+    """Best-effort scraper for any non-Naver blog/article URL.
+
+    Naver's post structure is fixed and well-known (`fetch_naver_blog_content`
+    above targets it exactly), but there is no single markup convention across
+    Tistory, Velog, brunch, WordPress, Medium, and plain article pages. This
+    uses a prioritized list of common container selectors, falling back to
+    "the <div> with the most text" heuristic when none of them match.
+    """
+    try:
+        response = requests.get(url, headers={"User-Agent": _USER_AGENT}, timeout=settings.blog_fetch_timeout_seconds)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"블로그 페이지를 가져오지 못했습니다: {exc}") from exc
+
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"블로그 페이지를 가져오지 못했습니다 (HTTP {response.status_code}).",
+        )
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    _strip_noise_tags(soup)
+
+    title = _extract_generic_title(soup)
+    container = _find_generic_content_container(soup)
+
+    paragraph_elements = container.find_all(["p", "li", "h2", "h3", "blockquote"])
+    paragraphs = [clean_subtitle_text(element.get_text(" ")) for element in paragraph_elements]
+    text = " ".join(paragraph for paragraph in paragraphs if paragraph)
+    if not text:
+        text = clean_subtitle_text(container.get_text(" "))
+    if not text:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="블로그 본문 텍스트를 추출하지 못했습니다.")
+
+    image_urls = _extract_image_urls(container, url)
+    if len(image_urls) < settings.blog_image_min_count:
+        # The hero/thumbnail image is sometimes rendered outside the main
+        # content container (e.g. a separate header banner) — widen the
+        # search to the whole page if the container alone came up short.
+        page_image_urls = _extract_image_urls(soup, url)
+        image_urls = image_urls + [candidate for candidate in page_image_urls if candidate not in image_urls]
 
     return BlogContent(title=title, text=text[:6000], image_urls=image_urls)
+
+
+def fetch_blog_content(url: str) -> BlogContent:
+    if _is_naver_blog_url(url):
+        return fetch_naver_blog_content(url)
+    return fetch_generic_blog_content(url)
 
 
 def download_blog_images(image_urls: list[str], dest_dir: Path) -> list[Path]:
@@ -406,10 +534,23 @@ def _narration_subtitle_events(script: str, total_duration: float) -> list[tuple
 # --- Orchestration ------------------------------------------------------------
 
 
-def _update_blog_clip_status(conn: sqlite3.Connection, blog_clip_id: int, status_value: str, error_message: str | None) -> None:
+def _update_blog_clip_progress(conn: sqlite3.Connection, blog_clip_id: int, checkpoint: tuple[str, str, int]) -> None:
+    status_value, progress_stage, progress_percent = checkpoint
     conn.execute(
-        "UPDATE blog_clips SET status = ?, error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (status_value, error_message, blog_clip_id),
+        """
+        UPDATE blog_clips
+        SET status = ?, progress_stage = ?, progress_percent = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (status_value, progress_stage, progress_percent, blog_clip_id),
+    )
+    conn.commit()
+
+
+def _update_blog_clip_failed(conn: sqlite3.Connection, blog_clip_id: int, error_message: str) -> None:
+    conn.execute(
+        "UPDATE blog_clips SET status = 'failed', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (error_message, blog_clip_id),
     )
     conn.commit()
 
@@ -422,10 +563,13 @@ def _update_blog_clip_result(
     video_path: str,
     subtitled_video_path: str,
 ) -> None:
+    status_value, progress_stage, progress_percent = PROGRESS_DONE
     conn.execute(
         """
         UPDATE blog_clips
-        SET status = 'completed',
+        SET status = ?,
+            progress_stage = ?,
+            progress_percent = ?,
             blog_title = ?,
             narration_script = ?,
             video_path = ?,
@@ -434,71 +578,100 @@ def _update_blog_clip_result(
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (blog_title, narration_script, video_path, subtitled_video_path, blog_clip_id),
+        (status_value, progress_stage, progress_percent, blog_title, narration_script, video_path, subtitled_video_path, blog_clip_id),
     )
     conn.commit()
 
 
-def create_blog_short(conn: sqlite3.Connection, user_id: int, url: str, style: str) -> BlogClip:
+def create_blog_clip_job(conn: sqlite3.Connection, user_id: int, url: str, style: str) -> BlogClip:
+    """Insert a `pending` blog_clips row and return immediately.
+
+    The actual scrape/GPT/TTS/FFmpeg pipeline is not run here — call
+    `run_blog_clip_pipeline()` (typically via FastAPI `BackgroundTasks`) to
+    execute it after this returns. This split is what makes `POST
+    /blog-clips` respond instantly instead of blocking for up to a minute.
+    """
     if style not in ALLOWED_SUBTITLE_STYLES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Subtitle style must be basic, bold, or shorts.")
 
+    status_value, progress_stage, progress_percent = PROGRESS_QUEUED
     cursor = conn.execute(
-        "INSERT INTO blog_clips (user_id, source_url, subtitle_style, status) VALUES (?, ?, ?, 'pending')",
-        (user_id, url, style),
+        """
+        INSERT INTO blog_clips (user_id, source_url, subtitle_style, status, progress_stage, progress_percent)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (user_id, url, style, status_value, progress_stage, progress_percent),
     )
     conn.commit()
     blog_clip_id = int(cursor.lastrowid)
-    _update_blog_clip_status(conn, blog_clip_id, "processing", None)
+    blog_clip = get_blog_clip_for_user(conn, user_id, blog_clip_id)
+    if blog_clip is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Blog short creation failed.")
+    return blog_clip
 
+
+def run_blog_clip_pipeline(blog_clip_id: int, user_id: int, url: str, style: str) -> None:
+    """The actual scrape -> GPT -> TTS -> FFmpeg pipeline, run out-of-request.
+
+    Opens its own SQLite connection because the request-scoped connection
+    used by the API layer is already closed by the time a FastAPI background
+    task runs (background tasks execute after the response has been sent).
+    """
+    connection_generator = get_connection()
+    conn = next(connection_generator)
     try:
-        blog_content = fetch_naver_blog_content(url)
+        try:
+            _update_blog_clip_progress(conn, blog_clip_id, PROGRESS_SCRAPING)
+            blog_content = fetch_blog_content(url)
 
-        image_dir = BLOG_IMAGE_ROOT / str(user_id) / str(blog_clip_id)
-        image_paths = download_blog_images(blog_content.image_urls, image_dir)
-        if len(image_paths) < settings.blog_image_min_count:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=(
-                    f"블로그에서 사용할 수 있는 이미지가 부족합니다 "
-                    f"({len(image_paths)}개, 최소 {settings.blog_image_min_count}개 필요)."
-                ),
-            )
+            _update_blog_clip_progress(conn, blog_clip_id, PROGRESS_DOWNLOADING_IMAGES)
+            image_dir = BLOG_IMAGE_ROOT / str(user_id) / str(blog_clip_id)
+            image_paths = download_blog_images(blog_content.image_urls, image_dir)
+            if len(image_paths) < settings.blog_image_min_count:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"블로그에서 사용할 수 있는 이미지가 부족합니다 "
+                        f"({len(image_paths)}개, 최소 {settings.blog_image_min_count}개 필요)."
+                    ),
+                )
 
-        script = generate_blog_narration_script(blog_content.title, blog_content.text)
-        narration_audio_path = synthesize_openai_tts(user_id, blog_clip_id, script)
+            _update_blog_clip_progress(conn, blog_clip_id, PROGRESS_GENERATING_SCRIPT)
+            script = generate_blog_narration_script(blog_content.title, blog_content.text)
 
-        video_dir = BLOG_OUTPUT_ROOT / str(user_id)
-        video_dir.mkdir(parents=True, exist_ok=True)
-        video_path = video_dir / f"{uuid.uuid4().hex}.mp4"
-        create_image_slideshow([str(path) for path in image_paths], narration_audio_path, str(video_path))
+            _update_blog_clip_progress(conn, blog_clip_id, PROGRESS_SYNTHESIZING_AUDIO)
+            narration_audio_path = synthesize_openai_tts(user_id, blog_clip_id, script)
 
-        total_duration = get_video_duration_seconds(str(video_path))
-        events = _narration_subtitle_events(script, total_duration)
-        subtitle_path = BLOG_SUBTITLE_ROOT / str(user_id) / f"blog_{blog_clip_id}_{style}.ass"
-        if events:
-            write_ass_file(subtitle_path, style, events)
+            _update_blog_clip_progress(conn, blog_clip_id, PROGRESS_RENDERING_VIDEO)
+            video_dir = BLOG_OUTPUT_ROOT / str(user_id)
+            video_dir.mkdir(parents=True, exist_ok=True)
+            video_path = video_dir / f"{uuid.uuid4().hex}.mp4"
+            create_image_slideshow([str(path) for path in image_paths], narration_audio_path, str(video_path))
 
-        subtitled_video_path = video_dir / f"{video_path.stem}_subtitled.mp4"
-        if events:
-            burn_subtitles_into_video(str(video_path), str(subtitle_path), str(subtitled_video_path))
-        else:
-            subtitled_video_path = video_path
-    except HTTPException as exc:
-        _update_blog_clip_status(conn, blog_clip_id, "failed", str(exc.detail))
-        raise
-    except (FFmpegNotAvailableError, FFprobeNotAvailableError, FFmpegSlideshowError, FFmpegSubtitleError, TimeoutError) as exc:
-        _update_blog_clip_status(conn, blog_clip_id, "failed", str(exc))
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-    except Exception as exc:
-        _update_blog_clip_status(conn, blog_clip_id, "failed", "Unexpected blog short generation failure.")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected blog short generation failure.") from exc
+            total_duration = get_video_duration_seconds(str(video_path))
+            events = _narration_subtitle_events(script, total_duration)
+            subtitle_path = BLOG_SUBTITLE_ROOT / str(user_id) / f"blog_{blog_clip_id}_{style}.ass"
 
-    _update_blog_clip_result(conn, blog_clip_id, blog_content.title, script, str(video_path), str(subtitled_video_path))
-    refreshed = get_blog_clip_for_user(conn, user_id, blog_clip_id)
-    if refreshed is None:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Blog short status refresh failed.")
-    return refreshed
+            _update_blog_clip_progress(conn, blog_clip_id, PROGRESS_BURNING_SUBTITLES)
+            if events:
+                write_ass_file(subtitle_path, style, events)
+                subtitled_video_path = video_dir / f"{video_path.stem}_subtitled.mp4"
+                burn_subtitles_into_video(str(video_path), str(subtitle_path), str(subtitled_video_path))
+            else:
+                subtitled_video_path = video_path
+        except HTTPException as exc:
+            _update_blog_clip_failed(conn, blog_clip_id, str(exc.detail))
+            return
+        except (FFmpegNotAvailableError, FFprobeNotAvailableError, FFmpegSlideshowError, FFmpegSubtitleError, TimeoutError) as exc:
+            _update_blog_clip_failed(conn, blog_clip_id, str(exc))
+            return
+        except Exception:
+            _update_blog_clip_failed(conn, blog_clip_id, "Unexpected blog short generation failure.")
+            return
+
+        _update_blog_clip_result(conn, blog_clip_id, blog_content.title, script, str(video_path), str(subtitled_video_path))
+    finally:
+        next(connection_generator, None)
 
 
 def get_or_create_blog_metadata(conn: sqlite3.Connection, user_id: int, blog_clip_id: int) -> BlogClip:

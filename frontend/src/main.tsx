@@ -100,6 +100,8 @@ type BlogClip = {
   video_path: string | null;
   subtitled_video_path: string | null;
   status: ClipStatus;
+  progress_stage: string;
+  progress_percent: number;
   error_message: string | null;
   title_candidates: string[];
   description: string | null;
@@ -140,6 +142,18 @@ const TTS_MODE_LABELS: Record<TtsMode, string> = {
   original_audio: "원본 음성",
   ai_narration: "AI 나레이션",
 };
+
+const BLOG_PROGRESS_STAGE_LABELS: Record<string, string> = {
+  queued: "대기 중",
+  scraping: "블로그 글 읽는 중",
+  downloading_images: "이미지 다운로드 중",
+  generating_script: "나레이션 대본 작성 중",
+  synthesizing_audio: "음성 합성 중",
+  rendering_video: "영상 합성 중",
+  burning_subtitles: "자막 입히는 중",
+  done: "완료",
+};
+const BLOG_CLIP_POLL_INTERVAL_MS = 2000;
 
 function App() {
   const [view, setView] = useState<View>("login");
@@ -232,7 +246,25 @@ function App() {
   }
 
   async function loadBlogClips() {
-    setBlogClips(await authorizedRequest<BlogClip[]>("/blog-clips"));
+    const loaded = await authorizedRequest<BlogClip[]>("/blog-clips");
+    setBlogClips(loaded);
+    loaded
+      .filter((clip) => clip.status === "pending" || clip.status === "processing")
+      .forEach((clip) => pollBlogClip(clip.id));
+  }
+
+  function pollBlogClip(blogClipId: number) {
+    const intervalId = window.setInterval(async () => {
+      try {
+        const updated = await authorizedRequest<BlogClip>(`/blog-clips/${blogClipId}`);
+        setBlogClips((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+        if (updated.status === "completed" || updated.status === "failed") {
+          window.clearInterval(intervalId);
+        }
+      } catch {
+        window.clearInterval(intervalId);
+      }
+    }, BLOG_CLIP_POLL_INTERVAL_MS);
   }
 
   async function loadCurrentUser(token: string) {
@@ -347,11 +379,11 @@ function App() {
   async function handleCreateBlogShort(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!blogUrl.trim()) {
-      setUploadMessage("먼저 네이버 블로그 URL을 입력해주세요.");
+      setUploadMessage("먼저 블로그 글 URL을 입력해주세요.");
       return;
     }
     setIsCreatingBlogShort(true);
-    setUploadMessage("쇼츠를 만들고 있습니다. 최대 1분 정도 걸릴 수 있어요...");
+    setUploadMessage("블로그 쇼츠 생성을 시작했습니다. 아래 목록에서 진행 상태를 확인할 수 있어요.");
     try {
       const blogClip = await authorizedRequest<BlogClip>("/blog-clips", {
         method: "POST",
@@ -359,7 +391,7 @@ function App() {
       });
       setBlogClips((current) => [blogClip, ...current]);
       setBlogUrl("");
-      setUploadMessage("블로그 쇼츠가 생성되었습니다.");
+      pollBlogClip(blogClip.id);
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : "블로그 쇼츠 생성에 실패했습니다.");
     } finally {
@@ -640,8 +672,8 @@ function App() {
 
           <form className="upload-form blog-form" onSubmit={handleCreateBlogShort}>
             <label>
-              네이버 블로그 URL
-              <input type="url" value={blogUrl} onChange={(event) => setBlogUrl(event.target.value)} placeholder="https://blog.naver.com/..." />
+              블로그/글 URL
+              <input type="url" value={blogUrl} onChange={(event) => setBlogUrl(event.target.value)} placeholder="https://blog.naver.com/... 또는 티스토리, 브런치 등" />
             </label>
             <label>
               자막 스타일
@@ -649,7 +681,7 @@ function App() {
                 {SUBTITLE_STYLES.map((style) => <option value={style} key={style}>{SUBTITLE_STYLE_LABELS[style]}</option>)}
               </select>
             </label>
-            <p className="file-note">네이버 블로그 글만 지원하며, 본문 텍스트와 이미지를 바탕으로 AI 나레이션 쇼츠를 만듭니다. 최대 1분 정도 걸릴 수 있어요.</p>
+            <p className="file-note">네이버 블로그는 물론 티스토리, 브런치 등 대부분의 블로그/기사 URL을 지원합니다. 본문 텍스트와 이미지를 바탕으로 AI 나레이션 쇼츠를 만듭니다. 최대 1분 정도 걸릴 수 있어요.</p>
             <button className="primary-button" type="submit" disabled={isCreatingBlogShort}>{isCreatingBlogShort ? "생성 중" : "블로그로 쇼츠 만들기"}</button>
           </form>
 
@@ -1005,6 +1037,8 @@ function BlogClipCard({
 }) {
   const canDownload = Boolean(blogClip.subtitled_video_path || blogClip.video_path);
   const hasMetadata = blogClip.title_candidates.length > 0;
+  const isInProgress = blogClip.status === "pending" || blogClip.status === "processing";
+  const stageLabel = BLOG_PROGRESS_STAGE_LABELS[blogClip.progress_stage] ?? blogClip.progress_stage;
   return (
     <article className={`blog-clip-item clip-${blogClip.status}`}>
       <h4>{blogClip.blog_title ?? "블로그 쇼츠"}</h4>
@@ -1013,6 +1047,14 @@ function BlogClipCard({
         <span className={`status-badge status-${blogClip.status}`}>{CLIP_STATUS_LABELS[blogClip.status]}</span>
         <span>자막: {SUBTITLE_STYLE_LABELS[blogClip.subtitle_style as SubtitleStyle] ?? blogClip.subtitle_style}</span>
       </div>
+      {isInProgress ? (
+        <div className="blog-progress" aria-live="polite">
+          <div className="blog-progress-track">
+            <div className="blog-progress-fill" style={{ width: `${blogClip.progress_percent}%` }} />
+          </div>
+          <span className="blog-progress-label">{stageLabel} ({blogClip.progress_percent}%)</span>
+        </div>
+      ) : null}
       {blogClip.narration_script ? <p className="narration-script">{blogClip.narration_script}</p> : null}
       {blogClip.error_message ? <p className="error-text">{blogClip.error_message}</p> : null}
       {canDownload ? (

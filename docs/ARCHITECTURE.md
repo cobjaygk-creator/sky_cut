@@ -11,11 +11,12 @@ foundation:
    burned-in captions, optionally replace the audio with an AI narration,
    generate upload-ready metadata, and download the result.
 2. **Blog clips** (added after Stage 13, see `docs/PROJECT_STATUS.md`):
-   turn a Naver blog post into a narrated vertical slideshow video in a
-   single request — no source video required. This is the first step toward
-   a SuperShorts-style "text/blog -> shorts" product; see
-   `docs/PROJECT_STATUS.md` for the follow-up roadmap (async processing,
-   scene/board editing, multi-voice TTS, templates, etc.).
+   turn a blog/article post (Naver blog, Tistory, brunch, or most other
+   blogs/news pages) into a narrated vertical slideshow video, submitted as
+   one async job with progress polling — no source video required. This is
+   the first step toward a SuperShorts-style "text/blog -> shorts" product;
+   see `docs/PROJECT_STATUS.md` for the follow-up roadmap (scene/board
+   editing, multi-voice TTS, templates, etc.).
 
 ## Current Stack
 
@@ -32,8 +33,10 @@ foundation:
 - Upload metadata generation: OpenAI GPT API (JSON response parsing)
 - TTS narration: OpenAI TTS API (structured so another provider such as
   ElevenLabs could be swapped in behind `tts_service.py`)
-- Blog scraping: `requests` + `BeautifulSoup` (`beautifulsoup4`), Naver blog
-  post HTML only today
+- Blog scraping: `requests` + `BeautifulSoup` (`beautifulsoup4`) — a
+  Naver-specific parser plus a generic heuristic parser (common container
+  selectors, falling back to "largest `<div>` by text") for every other
+  blog/article URL
 
 ## High-Level Flow
 
@@ -157,21 +160,44 @@ POST /clips/{clip_id}/metadata
   -> subsequent calls return the cached row instead of calling GPT again
 ```
 
-Blog clips (Naver blog -> narrated shorts, single request, synchronous):
+Blog clips (blog/article URL -> narrated shorts, async job with progress polling):
 
 ```text
 POST /blog-clips  { "url": "https://blog.naver.com/...", "style": "shorts" }
-  -> insert blog_clips row, status pending -> processing
-  -> scrape the post (BeautifulSoup): title, body text, image URLs
-  -> download up to BLOG_IMAGE_MAX_COUNT images (409 if fewer than
-     BLOG_IMAGE_MIN_COUNT usable images were found)
-  -> GPT: summarize into a ~30-45s Korean narration script
-  -> OpenAI TTS: synthesize the script to an mp3
-  -> FFmpeg: build a 1080x1920 image slideshow timed to the narration audio
-     (create_image_slideshow(); equal duration per image, no pan/zoom yet)
-  -> split the narration script into subtitle events proportional to
-     sentence length, write an .ass file, burn it into the slideshow
-  -> set completed (video_path, subtitled_video_path) or failed (error_message)
+  -> create_blog_clip_job(): insert blog_clips row (status pending,
+     progress_stage 'queued', progress_percent 0), return immediately (~ms)
+  -> BackgroundTasks schedules run_blog_clip_pipeline() to run after the
+     response is sent, using its own SQLite connection (opened via
+     get_connection(), not the request-scoped one, which is already closed
+     by the time a background task executes)
+
+run_blog_clip_pipeline() (background, updates progress_stage/progress_percent
+at each step so the frontend can poll and show a progress bar):
+  -> scraping (10%): fetch_blog_content() dispatches on the URL host —
+     fetch_naver_blog_content() for blog.naver.com (targets the known
+     `.se-main-container`/`.se-text-paragraph` structure exactly), or
+     fetch_generic_blog_content() for every other blog/article URL (tries a
+     prioritized list of common container selectors — article, [role=main],
+     .entry-content, etc. — then falls back to "the <div> with the most
+     text" if none match). Both return title/body text/image URLs.
+  -> downloading_images (25%): download up to BLOG_IMAGE_MAX_COUNT images
+     (fails with 409-style error message if fewer than BLOG_IMAGE_MIN_COUNT
+     usable images were found)
+  -> generating_script (40%): GPT summarizes into a ~30-45s Korean narration script
+  -> synthesizing_audio (55%): OpenAI TTS synthesizes the script to an mp3
+  -> rendering_video (75%): FFmpeg builds a 1080x1920 image slideshow timed to
+     the narration audio (create_image_slideshow(); equal duration per image,
+     no pan/zoom yet)
+  -> burning_subtitles (90%): split the narration script into subtitle events
+     proportional to sentence length, write an .ass file, burn it into the
+     slideshow
+  -> done (100%): set completed (video_path, subtitled_video_path), or on any
+     failure at any step above, set failed (error_message) and stop
+
+GET /blog-clips/{id} (and GET /blog-clips list)
+  -> read-only; the frontend polls this every 2s while status is
+     pending/processing to drive a progress bar, and stops polling once
+     status is completed or failed
 ```
 
 This reuses `tts_service.py` (audio synthesis) and the ASS subtitle
@@ -179,10 +205,11 @@ conventions originally written for `clip_service.py`, which were extracted
 into `subtitle_utils.py` so both pipelines share the exact same font/style/
 wrapping logic instead of duplicating it.
 
-Note: unlike every other long-running endpoint in this codebase, `POST
-/blog-clips` has no separate "start" vs "poll status" step — the whole
-pipeline above runs inside the single request/response cycle. This is a
-known gap (see `docs/PROJECT_STATUS.md`), not a design goal.
+Note: the background task above runs in-process (FastAPI `BackgroundTasks`,
+not a separate worker/queue like Celery or RQ). This is sufficient for a
+single local `uvicorn` process but would need a real job queue before
+running multiple server processes/machines — see `docs/PROJECT_STATUS.md`
+"Stage 15 details".
 
 Usage / plan enforcement:
 
@@ -222,8 +249,8 @@ backend/app/
   services/clip_service.py      Clip render, ASS subtitle build + burn-in
   services/tts_service.py       Narration script generation + OpenAI TTS synthesis
   services/metadata_service.py  Title/description/hashtag generation
-  services/blog_service.py      Naver blog scraping, image download, GPT script/metadata,
-                                 slideshow + subtitle orchestration for blog clips
+  services/blog_service.py      Naver + generic blog/article scraping, image download, GPT
+                                 script/metadata, slideshow + subtitle orchestration for blog clips
   services/subtitle_utils.py    Shared ASS subtitle helpers (wrap/split/timecode/style),
                                  originally part of clip_service.py, now used by both
                                  clip_service.py and blog_service.py
@@ -320,13 +347,17 @@ clip_metadata
 blog_clips
   id INTEGER PRIMARY KEY AUTOINCREMENT
   user_id INTEGER NOT NULL
-  source_url TEXT NOT NULL                -- Naver blog post URL
+  source_url TEXT NOT NULL                -- blog/article post URL (Naver or generic)
   blog_title TEXT                         -- scraped post title
   narration_script TEXT                   -- GPT-generated narration script
   subtitle_style TEXT NOT NULL DEFAULT 'shorts'  -- 'basic' | 'bold' | 'shorts'
   video_path TEXT                         -- rendered slideshow (no subtitles)
   subtitled_video_path TEXT               -- slideshow with captions burned in
   status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'completed', 'failed'))
+  progress_stage TEXT NOT NULL DEFAULT 'queued'    -- queued/scraping/downloading_images/
+                                                     -- generating_script/synthesizing_audio/
+                                                     -- rendering_video/burning_subtitles/done
+  progress_percent INTEGER NOT NULL DEFAULT 0      -- 0-100, matches progress_stage
   error_message TEXT
   title_candidates_json TEXT              -- set by POST /blog-clips/{id}/metadata
   description TEXT
@@ -417,12 +448,13 @@ backend/app/storage/blog/subtitles/<user_id>/blog_<id>_<style>.ass     generated
   MVP, worth revisiting before a public release.
 - There is no dedicated "my clips" list endpoint; clips are only reachable
   through the highlight that created them.
-- `POST /blog-clips` runs its entire pipeline (scrape, download images, GPT
-  script, TTS, FFmpeg slideshow, subtitle burn-in) synchronously inside one
-  request — no background job/queue and no progress reporting yet. This is
-  the top priority follow-up before adding more blog-clip features; see
-  `docs/PROJECT_STATUS.md` for the planned roadmap.
-- Blog clips only support `blog.naver.com` URLs today; other blog platforms
-  are not scraped.
+- `POST /blog-clips` runs its pipeline asynchronously via FastAPI
+  `BackgroundTasks` with `progress_stage`/`progress_percent` polling (Stage
+  15), but this is still in-process background work, not a real job
+  queue/worker — fine for one local server, not for multiple.
+- Blog clips support Naver blog and a generic best-effort scraper for other
+  blog/article URLs (Stage 16), but the generic parser is heuristic, not a
+  true reader-mode extractor — it can fail on heavily JS-rendered pages or
+  sites that block scraping.
 - Blog clips use a single fixed narration voice/tone and a static per-image
   slideshow (no pan/zoom animation, no scene-level editing after generation).

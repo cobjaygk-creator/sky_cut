@@ -7,10 +7,12 @@ pipelines:
    highlight suggestions, generate a vertical short with burned-in captions,
    optionally replace the audio with an AI narration, generate upload-ready
    title/description/hashtags, and download the result.
-2. **Blog clips**: paste a Naver blog post URL and get back a narrated
-   vertical slideshow video with burned-in captions in one request — no
-   source video needed. See `docs/PROJECT_STATUS.md` "Roadmap: Blog Clips ->
-   SuperShorts-Level Product" for where this is headed.
+2. **Blog clips**: paste a blog/article post URL (Naver blog, Tistory,
+   brunch, or most other blogs/news pages) and get back a narrated vertical
+   slideshow video with burned-in captions — submitted as an async job with
+   progress polling, no source video needed. See `docs/PROJECT_STATUS.md`
+   "Roadmap: Blog Clips -> SuperShorts-Level Product" for where this is
+   headed.
 
 More documentation:
 
@@ -36,8 +38,9 @@ Current capabilities:
 - AI narration mode for generated clips
 - Authenticated clip download
 - Free/Lite/Pro plan policy and monthly analysis usage limits
-- Blog-to-shorts pipeline: Naver blog scraping, GPT narration script, OpenAI
-  TTS, FFmpeg image slideshow, subtitle burn-in, AI metadata, download
+- Blog-to-shorts pipeline: Naver + generic blog/article scraping, GPT
+  narration script, OpenAI TTS, FFmpeg image slideshow, subtitle burn-in,
+  AI metadata, download
 - React + Vite + TypeScript frontend controls for upload, YouTube import, analysis, transcript, highlights, clips, subtitles, metadata, TTS mode, usage plans, blog clips, and download
 
 ## Requirements
@@ -190,7 +193,7 @@ GET /clips/{clip_id}
 GET /clips/{clip_id}/download
 ```
 
-Blog clips (Naver blog URL -> narrated shorts, no source video needed):
+Blog clips (blog/article URL -> narrated shorts, no source video needed):
 
 ```text
 POST /blog-clips
@@ -243,30 +246,34 @@ Video analysis fails immediately with a duration or plan-limit message
      monthly analysis count. See "Usage Plans" above to change the plan
      locally for testing.
 
-"네이버 블로그(blog.naver.com) URL만 지원합니다." (blog clips)
-  -> Only blog.naver.com post URLs are supported today. Other blog
-     platforms are not scraped yet.
+A blog clip stays stuck on "블로그 글 읽는 중" (scraping) then fails
+  -> The generic scraper is a best-effort heuristic (Stage 16): it can fail
+     on heavily JavaScript-rendered pages or sites that block scraping.
+     Check the `error_message` on the failed row (or `GET
+     /blog-clips/{id}`) for the exact reason.
 
 "블로그에서 사용할 수 있는 이미지가 부족합니다" (blog clips)
   -> The post has fewer usable images than BLOG_IMAGE_MIN_COUNT (default 3).
      Pick a post with more images, or lower BLOG_IMAGE_MIN_COUNT in
      backend/.env for local testing.
 
-POST /blog-clips takes a long time to respond
-  -> This is expected today: scraping, GPT script generation, TTS synthesis,
-     and FFmpeg rendering all happen inside the single request/response
-     cycle (no background job queue yet). See docs/PROJECT_STATUS.md
-     "Roadmap" Stage 15 for the planned fix.
+POST /blog-clips returns "pending" but the video takes a while to finish
+  -> This is expected: scraping, GPT script generation, TTS synthesis, and
+     FFmpeg rendering run in the background after the request returns
+     (Stage 15). Poll GET /blog-clips/{id} for progress_stage/
+     progress_percent, or just watch the progress bar in the UI.
 ```
 
 ## Current Stage
 
-Stage 14 is complete: the original 13-stage video-clipping MVP (project
+Stage 16 is complete: the original 13-stage video-clipping MVP (project
 skeleton, auth, upload, audio extraction, STT, highlight recommendation, clip
 generation, subtitles, preview/download, metadata generation, TTS narration,
 usage plans, and a full review) is implemented and locally verified, and the
-blog-clip pipeline (built after Stage 13) is now documented. Real payment
-integration is intentionally not implemented. See `docs/PROJECT_STATUS.md`
-for the full stage history, known limitations, and the roadmap for growing
-the blog-clip pipeline into a SuperShorts-level product.
+blog-clip pipeline (built after Stage 13) now runs asynchronously with
+progress polling (Stage 15) and accepts any blog/article URL, not just
+Naver (Stage 16). Real payment integration is intentionally not
+implemented. See `docs/PROJECT_STATUS.md` for the full stage history, known
+limitations, and the roadmap for growing the blog-clip pipeline into a
+SuperShorts-level product.
 

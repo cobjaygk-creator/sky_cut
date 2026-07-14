@@ -96,6 +96,8 @@ class BlogClip:
     video_path: str | None
     subtitled_video_path: str | None
     status: str
+    progress_stage: str
+    progress_percent: int
     error_message: str | None
     title_candidates_json: str | None
     description: str | None

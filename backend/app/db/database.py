@@ -243,6 +243,8 @@ def _create_blog_clips_table(conn: sqlite3.Connection) -> None:
             video_path TEXT,
             subtitled_video_path TEXT,
             status TEXT NOT NULL CHECK (status IN ({BLOG_CLIP_STATUSES})),
+            progress_stage TEXT NOT NULL DEFAULT 'queued',
+            progress_percent INTEGER NOT NULL DEFAULT 0,
             error_message TEXT,
             title_candidates_json TEXT,
             description TEXT,
@@ -255,6 +257,15 @@ def _create_blog_clips_table(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_clips_user_id ON blog_clips (user_id)")
+
+
+def _migrate_blog_clips_table(conn: sqlite3.Connection) -> None:
+    columns = _sqlite_columns(conn, "blog_clips")
+    if "progress_stage" not in columns:
+        conn.execute("ALTER TABLE blog_clips ADD COLUMN progress_stage TEXT NOT NULL DEFAULT 'queued'")
+    if "progress_percent" not in columns:
+        conn.execute("ALTER TABLE blog_clips ADD COLUMN progress_percent INTEGER NOT NULL DEFAULT 0")
+    conn.execute("UPDATE blog_clips SET progress_stage = 'done', progress_percent = 100 WHERE status = 'completed' AND progress_percent < 100")
 
 
 def init_db() -> None:
@@ -282,4 +293,5 @@ def init_db() -> None:
         _create_clips_table(conn)
         _create_clip_metadata_table(conn)
         _create_blog_clips_table(conn)
+        _migrate_blog_clips_table(conn)
         conn.commit()

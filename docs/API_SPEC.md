@@ -378,12 +378,26 @@ disk (e.g. deleted manually), `409` if no output has been rendered yet.
 
 ## Blog Clips
 
-Converts a Naver blog post into a vertical AI-narrated shorts video: scrape
+Converts a blog/article post into a vertical AI-narrated shorts video: scrape
 the post's text and images, generate a narration script with GPT, synthesize
 it with OpenAI TTS, render an image slideshow with FFmpeg, and burn in
 auto-timed captions. Unlike `Clips` above (which is derived from an uploaded
-video's highlight), a blog clip has no source video — the whole pipeline runs
-in a single request.
+video's highlight), a blog clip has no source video.
+
+As of Stage 16, any blog/article URL is accepted, not just
+`blog.naver.com`. Naver blog posts use a dedicated scraper that targets
+Naver's known post structure exactly; every other URL goes through a generic
+best-effort scraper (common container selectors, falling back to "the
+`<div>` with the most text" if none match) — see `docs/PROJECT_STATUS.md`
+"Stage 16 details" for how it works and its limitations (heavily
+JS-rendered pages or scraping-blocked sites can still fail).
+
+As of Stage 15, this pipeline runs **asynchronously**: `POST /blog-clips`
+inserts a `pending` row and returns immediately (typically well under a
+second); the actual scrape/GPT/TTS/FFmpeg work runs afterward as a FastAPI
+background task. Poll `GET /blog-clips/{blog_clip_id}` (e.g. every 2 seconds)
+to track `status`/`progress_stage`/`progress_percent` until it reaches
+`completed` or `failed`.
 
 ### `POST /blog-clips`
 
@@ -393,24 +407,33 @@ Request:
 { "url": "https://blog.naver.com/{blogId}/{logNo}", "style": "shorts" }
 ```
 
-`style` is one of `basic`, `bold`, `shorts` (default `shorts`). Only
-`blog.naver.com` URLs are supported today.
+`style` is one of `basic`, `bold`, `shorts` (default `shorts`). `url` can be
+any valid HTTP(S) URL — Naver blog posts and most other blog/article URLs
+(Tistory, brunch, news sites, etc.) are supported, see the Stage 16 note
+above.
 
-This call runs the full pipeline synchronously (scrape -> download images ->
-GPT script -> TTS -> FFmpeg slideshow -> subtitle burn-in -> save) before
-responding, so it can take from several seconds up to roughly a minute
-depending on OpenAI/FFmpeg latency. There is no background job queue yet —
-see `docs/PROJECT_STATUS.md` "Known Gaps" for the planned async follow-up.
+Validates the URL/style and inserts the row synchronously, then schedules the
+pipeline (scrape -> download images -> GPT script -> TTS -> FFmpeg slideshow
+-> subtitle burn-in -> save) to run in the background. The response reflects
+the freshly created row before any pipeline work has happened: `status:
+"pending"`, `progress_stage: "queued"`, `progress_percent: 0`.
 
 Response `201`: `BlogClipResponse` (see below).
 
-Errors:
-- `400` non-Naver-blog URL, or unsupported `style`
-- `409` fewer than `BLOG_IMAGE_MIN_COUNT` usable images were found on the post
-- `502` the blog page could not be fetched, or its content could not be parsed
-- `500` FFmpeg/FFprobe not installed, or slideshow/subtitle rendering failed
-- `400` `OPENAI_API_KEY` not configured (needed for the narration script and TTS)
-- `429`/`502` OpenAI rate limit or API error
+Errors from request validation (returned synchronously, before scheduling
+the background task):
+- `400` unsupported `style`
+- `422` malformed `url` (not a valid HTTP(S) URL)
+
+Errors that can occur during the background pipeline (not returned by this
+call — they instead show up as `status: "failed"` with `error_message` set
+when you poll `GET /blog-clips/{blog_clip_id}` afterward):
+- fewer than `BLOG_IMAGE_MIN_COUNT` usable images were found on the post
+- the blog page could not be fetched, its content could not be parsed, or
+  (for a Naver URL) the blog ID/post number couldn't be extracted from the URL
+- FFmpeg/FFprobe not installed, or slideshow/subtitle rendering failed
+- `OPENAI_API_KEY` not configured (needed for the narration script and TTS)
+- OpenAI rate limit or API error
 
 ### `GET /blog-clips`
 
@@ -432,6 +455,8 @@ Response `200`: `BlogClipResponse`. `404` if not found or not owned by the curre
   "video_path": "C:\\...\\outputs\\1\\....mp4",
   "subtitled_video_path": "C:\\...\\outputs\\1\\..._subtitled.mp4",
   "status": "completed",
+  "progress_stage": "done",
+  "progress_percent": 100,
   "error_message": null,
   "title_candidates": [],
   "description": null,
@@ -443,6 +468,12 @@ Response `200`: `BlogClipResponse`. `404` if not found or not owned by the curre
 ```
 
 `status` is one of: `pending`, `processing`, `completed`, `failed`.
+
+`progress_stage` is one of (in order): `queued` (0%), `scraping` (10%),
+`downloading_images` (25%), `generating_script` (40%), `synthesizing_audio`
+(55%), `rendering_video` (75%), `burning_subtitles` (90%), `done` (100%). A
+`failed` row keeps whatever `progress_stage`/`progress_percent` it last
+reached before the error, so you can tell which step failed.
 
 ### `POST /blog-clips/{blog_clip_id}/metadata`
 
