@@ -1,5 +1,6 @@
 ﻿import sqlite3
 from collections.abc import Generator
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.core.config import settings
@@ -17,10 +18,20 @@ DATABASE_PATH = _sqlite_path()
 VIDEO_STATUSES = "'uploaded', 'extracting_audio', 'audio_extracted', 'transcribing', 'transcribed', 'failed'"
 TRANSCRIPT_STATUSES = "'transcribing', 'transcribed', 'failed'"
 CLIP_STATUSES = "'pending', 'processing', 'completed', 'failed'"
+BLOG_CLIP_STATUSES = "'pending', 'processing', 'completed', 'failed'"
 
 
 def get_connection() -> Generator[sqlite3.Connection, None, None]:
-    conn = sqlite3.connect(DATABASE_PATH)
+    # FastAPI runs this sync generator dependency's "before yield" and
+    # "after yield" halves (and the endpoint itself) via anyio's worker
+    # thread pool, which does not guarantee the same OS thread is reused
+    # for all three parts. sqlite3 connections are thread-affine by default
+    # (check_same_thread=True), so without this flag every request would
+    # intermittently fail with "SQLite objects created in a thread can only
+    # be used in that same thread." Each request still gets its own
+    # connection that is opened and closed within that single request, so
+    # disabling the same-thread check here is safe.
+    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -30,6 +41,28 @@ def get_connection() -> Generator[sqlite3.Connection, None, None]:
 
 def _sqlite_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
     return {row["name"] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _current_usage_month() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m")
+
+
+def _migrate_users_table(conn: sqlite3.Connection) -> None:
+    columns = _sqlite_columns(conn, "users")
+    if "plan" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'")
+    if "monthly_usage" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN monthly_usage INTEGER NOT NULL DEFAULT 0")
+    if "usage_limit" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN usage_limit INTEGER NOT NULL DEFAULT 3")
+    if "usage_month" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN usage_month TEXT")
+    conn.execute("UPDATE users SET plan = LOWER(COALESCE(NULLIF(plan, ''), 'free'))")
+    conn.execute("UPDATE users SET usage_limit = 3 WHERE LOWER(plan) = 'free'")
+    conn.execute("UPDATE users SET usage_limit = 30 WHERE LOWER(plan) = 'lite'")
+    conn.execute("UPDATE users SET usage_limit = 150 WHERE LOWER(plan) = 'pro'")
+    conn.execute("UPDATE users SET plan = 'free', usage_limit = 3 WHERE LOWER(plan) NOT IN ('free', 'lite', 'pro')")
+    conn.execute("UPDATE users SET usage_month = ? WHERE usage_month IS NULL OR usage_month = ''", (_current_usage_month(),))
 
 
 def _create_videos_table(conn: sqlite3.Connection, table_name: str = "videos") -> None:
@@ -145,6 +178,10 @@ def _create_clips_table(conn: sqlite3.Connection) -> None:
             subtitle_style TEXT,
             subtitle_path TEXT,
             subtitled_output_path TEXT,
+            tts_mode TEXT NOT NULL DEFAULT 'original_audio',
+            narration_script TEXT,
+            narration_audio_path TEXT,
+            narrated_output_path TEXT,
             status TEXT NOT NULL CHECK (status IN ({CLIP_STATUSES})),
             error_message TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -162,8 +199,62 @@ def _create_clips_table(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE clips ADD COLUMN subtitle_path TEXT")
     if "subtitled_output_path" not in columns:
         conn.execute("ALTER TABLE clips ADD COLUMN subtitled_output_path TEXT")
+    if "tts_mode" not in columns:
+        conn.execute("ALTER TABLE clips ADD COLUMN tts_mode TEXT NOT NULL DEFAULT 'original_audio'")
+    if "narration_script" not in columns:
+        conn.execute("ALTER TABLE clips ADD COLUMN narration_script TEXT")
+    if "narration_audio_path" not in columns:
+        conn.execute("ALTER TABLE clips ADD COLUMN narration_audio_path TEXT")
+    if "narrated_output_path" not in columns:
+        conn.execute("ALTER TABLE clips ADD COLUMN narrated_output_path TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_clips_user_id ON clips (user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_clips_highlight_id ON clips (highlight_id)")
+
+
+def _create_clip_metadata_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS clip_metadata (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            clip_id INTEGER NOT NULL UNIQUE,
+            title_candidates_json TEXT NOT NULL DEFAULT '[]',
+            description TEXT NOT NULL DEFAULT '',
+            hashtags_json TEXT NOT NULL DEFAULT '[]',
+            error_message TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (clip_id) REFERENCES clips (id)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_clip_metadata_clip_id ON clip_metadata (clip_id)")
+
+
+def _create_blog_clips_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS blog_clips (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            source_url TEXT NOT NULL,
+            blog_title TEXT,
+            narration_script TEXT,
+            subtitle_style TEXT NOT NULL DEFAULT 'shorts',
+            video_path TEXT,
+            subtitled_video_path TEXT,
+            status TEXT NOT NULL CHECK (status IN ({BLOG_CLIP_STATUSES})),
+            error_message TEXT,
+            title_candidates_json TEXT,
+            description TEXT,
+            hashtags_json TEXT,
+            metadata_error TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_blog_clips_user_id ON blog_clips (user_id)")
 
 
 def init_db() -> None:
@@ -176,12 +267,19 @@ def init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 email TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
+                plan TEXT NOT NULL DEFAULT 'free',
+                monthly_usage INTEGER NOT NULL DEFAULT 0,
+                usage_limit INTEGER NOT NULL DEFAULT 3,
+                usage_month TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
+        _migrate_users_table(conn)
         _migrate_videos_table(conn)
         _create_transcripts_table(conn)
         _create_highlights_table(conn)
         _create_clips_table(conn)
+        _create_clip_metadata_table(conn)
+        _create_blog_clips_table(conn)
         conn.commit()

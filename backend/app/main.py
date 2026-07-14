@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, clips, users, videos
+from app.api import auth, blog, clips, users, videos
 from app.core.config import settings
 from app.db.database import init_db
 
@@ -28,6 +28,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(videos.router)
 app.include_router(clips.router)
+app.include_router(blog.router)
 
 
 @app.get("/health")

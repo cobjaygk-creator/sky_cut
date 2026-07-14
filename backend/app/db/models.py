@@ -5,6 +5,10 @@
 class User:
     id: int
     email: str
+    plan: str
+    monthly_usage: int
+    usage_limit: int
+    usage_month: str
     created_at: str
 
 
@@ -59,7 +63,43 @@ class Clip:
     subtitle_style: str | None
     subtitle_path: str | None
     subtitled_output_path: str | None
+    tts_mode: str
+    narration_script: str | None
+    narration_audio_path: str | None
+    narrated_output_path: str | None
     status: str
     error_message: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class ClipMetadata:
+    id: int
+    clip_id: int
+    title_candidates_json: str
+    description: str
+    hashtags_json: str
+    error_message: str | None
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class BlogClip:
+    id: int
+    user_id: int
+    source_url: str
+    blog_title: str | None
+    narration_script: str | None
+    subtitle_style: str
+    video_path: str | None
+    subtitled_video_path: str | None
+    status: str
+    error_message: str | None
+    title_candidates_json: str | None
+    description: str | None
+    hashtags_json: str | None
+    metadata_error: str | None
     created_at: str
     updated_at: str

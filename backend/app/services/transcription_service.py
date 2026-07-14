@@ -195,7 +195,7 @@ def transcribe_video(conn: sqlite3.Connection, user_id: int, video_id: int) -> T
         update_video_status(conn, video.id, "failed", video.audio_path, str(exc.detail))
         raise
     except RateLimitError as exc:
-        message = "OpenAI rate limit reached. Try again later."
+        message = f"OpenAI rate limit reached: {exc}"
         upsert_transcript(conn, video.id, "failed", None, [], message)
         update_video_status(conn, video.id, "failed", video.audio_path, message)
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=message) from exc

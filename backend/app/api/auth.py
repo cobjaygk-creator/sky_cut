@@ -13,7 +13,15 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", response_model=UserResponse, status_code=201)
 def register(payload: RegisterRequest, conn: sqlite3.Connection = Depends(get_connection)) -> UserResponse:
     user = create_user(conn, payload.email, payload.password)
-    return UserResponse(id=user.id, email=user.email, created_at=user.created_at)
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        plan=user.plan,
+        monthly_usage=user.monthly_usage,
+        usage_limit=user.usage_limit,
+        usage_month=user.usage_month,
+        created_at=user.created_at,
+    )
 
 
 @router.post("/login", response_model=TokenResponse)

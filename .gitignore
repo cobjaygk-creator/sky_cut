@@ -20,6 +20,7 @@ backend/app/storage/transcripts/
 backend/app/storage/subtitles/
 backend/app/storage/outputs/
 backend/app/storage/tts/
+backend/app/storage/blog/
 
 # OS/editor
 .DS_Store

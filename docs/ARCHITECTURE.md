@@ -2,21 +2,38 @@
 
 ## Goal
 
-New Cut is a local-first MVP for an AI shorts creation SaaS. The current system
-supports auth, MP4 upload, per-user video lists, FFmpeg audio extraction wiring,
-OpenAI transcription wiring, and GPT-based highlight recommendation wiring.
+New Cut is a local-first MVP for an AI shorts creation SaaS. It now has two
+independent content pipelines that share the same auth/plan/storage
+foundation:
+
+1. **Video clipping** (Stages 1-13): upload or YouTube-import a long video,
+   transcribe it, get AI highlight suggestions, generate a 9:16 clip with
+   burned-in captions, optionally replace the audio with an AI narration,
+   generate upload-ready metadata, and download the result.
+2. **Blog clips** (added after Stage 13, see `docs/PROJECT_STATUS.md`):
+   turn a Naver blog post into a narrated vertical slideshow video in a
+   single request — no source video required. This is the first step toward
+   a SuperShorts-style "text/blog -> shorts" product; see
+   `docs/PROJECT_STATUS.md` for the follow-up roadmap (async processing,
+   scene/board editing, multi-voice TTS, templates, etc.).
 
 ## Current Stack
 
 - Frontend: React + Vite + TypeScript
 - Backend: Python FastAPI
 - Database: SQLite
-- Auth: JWT
+- Auth: JWT (self-implemented HMAC-SHA256 signing, no third-party JWT library)
 - Password hashing: PBKDF2-SHA256 with per-password random salt
 - Storage: Local file storage
-- Video/audio processing: FFmpeg
-- AI transcription: OpenAI Audio Transcription API
-- Highlight recommendation: OpenAI GPT API with JSON response parsing
+- Video/audio processing: FFmpeg / FFprobe
+- Video import: yt-dlp (YouTube URLs)
+- AI transcription: OpenAI Audio Transcription API (Whisper)
+- Highlight recommendation: OpenAI GPT API (JSON response parsing)
+- Upload metadata generation: OpenAI GPT API (JSON response parsing)
+- TTS narration: OpenAI TTS API (structured so another provider such as
+  ElevenLabs could be swapped in behind `tts_service.py`)
+- Blog scraping: `requests` + `BeautifulSoup` (`beautifulsoup4`), Naver blog
+  post HTML only today
 
 ## High-Level Flow
 
@@ -27,8 +44,13 @@ User browser
   -> SQLite database
   -> Local file storage
   -> FFmpeg audio extraction
-  -> OpenAI transcription
+  -> OpenAI transcription (Whisper)
   -> GPT highlight recommendation
+  -> FFmpeg vertical clip render
+  -> ASS subtitle burn-in
+  -> GPT upload metadata (title/description/hashtags)
+  -> OpenAI TTS narration (optional)
+  -> Authenticated download
 ```
 
 ## Main Workflows
@@ -90,31 +112,131 @@ Note: `GET /videos/{video_id}/transcript` and `GET /videos/{video_id}/highlights
 currently have side effects when no cached result exists. This is acceptable for
 the MVP, but later should be split into POST generate endpoints and read-only GET endpoints.
 
+Clip generation:
+
+```text
+POST /clips/create
+  -> verify ownership of the highlight (join through videos)
+  -> insert clips row, status pending -> processing
+  -> FFmpeg: crop original video to the highlight time range, scale/crop to 1080x1920
+  -> save to backend/app/storage/outputs/<user_id>/<uuid>.mp4
+  -> set completed (output_path) or failed (error_message)
+```
+
+Subtitle burn-in:
+
+```text
+POST /clips/{clip_id}/subtitles
+  -> require a completed clip
+  -> collect transcript segments that overlap the clip's time range
+  -> wrap/split text into short lines, write an .ass file (basic/bold/shorts style)
+  -> FFmpeg subtitles filter burns the .ass file into a new mp4
+  -> save subtitle_path and subtitled_output_path on the clip row
+```
+
+AI narration (TTS):
+
+```text
+POST /clips/{clip_id}/narration  { "mode": "original_audio" | "ai_narration" }
+  -> original_audio: just record the mode, no re-encode
+  -> ai_narration:
+       -> GPT summarizes the highlight+transcript into a short narration script
+       -> OpenAI TTS renders the script to an mp3
+       -> FFmpeg replaces the clip's audio track with the narration mp3 (video stream copied)
+       -> save narration_script, narration_audio_path, narrated_output_path
+```
+
+Upload metadata generation:
+
+```text
+POST /clips/{clip_id}/metadata
+  -> require an existing clip and a completed transcript
+  -> build a transcript excerpt for the highlight's time range
+  -> GPT returns exactly 3 title candidates, 1 description, 10 hashtags (JSON)
+  -> validate/normalize hashtags, cap lengths, save to clip_metadata
+  -> subsequent calls return the cached row instead of calling GPT again
+```
+
+Blog clips (Naver blog -> narrated shorts, single request, synchronous):
+
+```text
+POST /blog-clips  { "url": "https://blog.naver.com/...", "style": "shorts" }
+  -> insert blog_clips row, status pending -> processing
+  -> scrape the post (BeautifulSoup): title, body text, image URLs
+  -> download up to BLOG_IMAGE_MAX_COUNT images (409 if fewer than
+     BLOG_IMAGE_MIN_COUNT usable images were found)
+  -> GPT: summarize into a ~30-45s Korean narration script
+  -> OpenAI TTS: synthesize the script to an mp3
+  -> FFmpeg: build a 1080x1920 image slideshow timed to the narration audio
+     (create_image_slideshow(); equal duration per image, no pan/zoom yet)
+  -> split the narration script into subtitle events proportional to
+     sentence length, write an .ass file, burn it into the slideshow
+  -> set completed (video_path, subtitled_video_path) or failed (error_message)
+```
+
+This reuses `tts_service.py` (audio synthesis) and the ASS subtitle
+conventions originally written for `clip_service.py`, which were extracted
+into `subtitle_utils.py` so both pipelines share the exact same font/style/
+wrapping logic instead of duplicating it.
+
+Note: unlike every other long-running endpoint in this codebase, `POST
+/blog-clips` has no separate "start" vs "poll status" step — the whole
+pipeline above runs inside the single request/response cycle. This is a
+known gap (see `docs/PROJECT_STATUS.md`), not a design goal.
+
+Usage / plan enforcement:
+
+```text
+Every authenticated request (get_current_user)
+  -> sync_user_usage_policy(): reset monthly_usage if the calendar month changed,
+     and recompute usage_limit from the user's current plan
+
+POST /videos/{video_id}/analyze (only for videos not yet analyzed this cycle)
+  -> ffprobe reads source duration
+  -> assert_can_analyze_video(): 403 if monthly_usage >= usage_limit,
+     403 if duration exceeds the plan's max_video_minutes
+  -> increment_monthly_usage() only after audio extraction succeeds
+```
+
 ## Backend Layout
 
 ```text
 backend/app/
-  main.py
-  api/auth.py
-  api/users.py
-  api/videos.py
-  core/config.py
-  core/security.py
-  db/database.py
-  db/models.py
-  db/schemas.py
-  services/user_service.py
-  services/video_service.py
-  services/ffmpeg_service.py
-  services/transcription_service.py
-  services/highlight_service.py
+  main.py                       FastAPI app, router registration, CORS, DB init on startup
+  api/auth.py                   POST /auth/register, POST /auth/login
+  api/users.py                  GET /me, GET /usage, GET /plans, get_current_user dependency
+  api/videos.py                 upload/import/list/detail/analyze/status/transcript/highlights
+  api/clips.py                  create/subtitles/narration/metadata/detail/download
+  api/blog.py                   POST/GET /blog-clips, metadata, detail, download
+  core/config.py                pydantic-settings, reads backend/.env
+  core/security.py              password hashing (PBKDF2) and self-signed JWT (HMAC-SHA256)
+  db/database.py                SQLite schema creation and lightweight migrations
+  db/models.py                  Plain dataclasses returned by service functions
+  db/schemas.py                 Pydantic request/response models used by the API layer
+  services/user_service.py      Register/login/lookup, row <-> User mapping
+  services/usage_service.py     Plan policy table, usage sync/check/increment
+  services/video_service.py     Upload, YouTube import, status transitions
+  services/ffmpeg_service.py    All subprocess calls to ffmpeg/ffprobe
+  services/transcription_service.py  Whisper call, audio chunking for large files
+  services/highlight_service.py GPT highlight recommendation, JSON validation
+  services/clip_service.py      Clip render, ASS subtitle build + burn-in
+  services/tts_service.py       Narration script generation + OpenAI TTS synthesis
+  services/metadata_service.py  Title/description/hashtag generation
+  services/blog_service.py      Naver blog scraping, image download, GPT script/metadata,
+                                 slideshow + subtitle orchestration for blog clips
+  services/subtitle_utils.py    Shared ASS subtitle helpers (wrap/split/timecode/style),
+                                 originally part of clip_service.py, now used by both
+                                 clip_service.py and blog_service.py
 ```
 
 ## Frontend Layout
 
 ```text
 frontend/src/
-  main.tsx       Login, register, dashboard, upload, analyze, transcript, highlights UI
+  main.tsx       Single-file app: login/register, dashboard, upload, YouTube import,
+                 analyze/transcript/highlights, clip creation, subtitle style picker,
+                 TTS mode picker, metadata panel with copy buttons, usage/plan panel,
+                 clip download
   styles.css     Base styling and dashboard controls
   vite-env.d.ts  Vite type declarations
 ```
@@ -126,6 +248,10 @@ users
   id INTEGER PRIMARY KEY AUTOINCREMENT
   email TEXT NOT NULL UNIQUE
   password_hash TEXT NOT NULL
+  plan TEXT NOT NULL DEFAULT 'free'              -- 'free' | 'lite' | 'pro'
+  monthly_usage INTEGER NOT NULL DEFAULT 0
+  usage_limit INTEGER NOT NULL DEFAULT 3
+  usage_month TEXT                                -- 'YYYY-MM', reset trigger
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 
 videos
@@ -159,14 +285,79 @@ highlights
   end_time REAL NOT NULL
   title TEXT NOT NULL
   reason TEXT NOT NULL
-  content_type TEXT NOT NULL
-  score REAL NOT NULL
+  content_type TEXT NOT NULL              -- 정보형/꿀팁형/후킹형/감정형/논쟁형/웃긴 장면
+  score REAL NOT NULL                     -- 0-100
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+clips
+  id INTEGER PRIMARY KEY AUTOINCREMENT
+  user_id INTEGER NOT NULL
+  video_id INTEGER NOT NULL
+  highlight_id INTEGER NOT NULL
+  output_path TEXT                        -- rendered 9:16 clip (no subtitles/narration)
+  subtitle_style TEXT                     -- 'basic' | 'bold' | 'shorts'
+  subtitle_path TEXT                      -- generated .ass file
+  subtitled_output_path TEXT              -- clip with subtitles burned in
+  tts_mode TEXT NOT NULL DEFAULT 'original_audio'  -- 'original_audio' | 'ai_narration'
+  narration_script TEXT
+  narration_audio_path TEXT               -- generated .mp3
+  narrated_output_path TEXT               -- clip with narration audio track
+  status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'completed', 'failed'))
+  error_message TEXT
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+clip_metadata
+  id INTEGER PRIMARY KEY AUTOINCREMENT
+  clip_id INTEGER NOT NULL UNIQUE
+  title_candidates_json TEXT NOT NULL DEFAULT '[]'   -- exactly 3 strings
+  description TEXT NOT NULL DEFAULT ''
+  hashtags_json TEXT NOT NULL DEFAULT '[]'           -- exactly 10 strings
+  error_message TEXT
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+blog_clips
+  id INTEGER PRIMARY KEY AUTOINCREMENT
+  user_id INTEGER NOT NULL
+  source_url TEXT NOT NULL                -- Naver blog post URL
+  blog_title TEXT                         -- scraped post title
+  narration_script TEXT                   -- GPT-generated narration script
+  subtitle_style TEXT NOT NULL DEFAULT 'shorts'  -- 'basic' | 'bold' | 'shorts'
+  video_path TEXT                         -- rendered slideshow (no subtitles)
+  subtitled_video_path TEXT               -- slideshow with captions burned in
+  status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'completed', 'failed'))
+  error_message TEXT
+  title_candidates_json TEXT              -- set by POST /blog-clips/{id}/metadata
+  description TEXT
+  hashtags_json TEXT
+  metadata_error TEXT
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 ```
+
+Unlike `clips`, `blog_clips` has no `video_id`/`highlight_id` — the whole
+video is generated from the blog post text/images in one call, with no
+underlying uploaded video row. This is also why the table has its own
+`title_candidates_json`/`description`/`hashtags_json`/`metadata_error`
+columns instead of a separate `blog_clip_metadata` table: the metadata
+generation step for blog clips has no dependency on transcript overlap logic
+the way clip metadata does, so a second table would be pure duplication.
+
+`backend/app/db/database.py` runs `ALTER TABLE`/rebuild migrations on startup
+so that upgrading from an older schema (missing `plan`, `tts_mode`, etc.) does
+not require deleting `new_cut.db`.
+
+Clip lookups are keyed by `highlight_id` in the frontend's React state (a
+highlight has at most one "current" clip in the UI), while the backend keys
+clips by their own `id` and by `user_id` for ownership checks.
 
 ## Environment Variables
 
 ```text
+# Backend
+APP_ENV=local
+APP_NAME=New Cut
 DATABASE_URL=sqlite:///./new_cut.db
 JWT_SECRET_KEY=change-this-before-production
 JWT_ALGORITHM=HS256
@@ -175,19 +366,63 @@ MAX_UPLOAD_MB=500
 OPENAI_API_KEY=sk-your-real-key
 OPENAI_TRANSCRIPTION_MODEL=whisper-1
 OPENAI_HIGHLIGHT_MODEL=gpt-4o-mini
+OPENAI_METADATA_MODEL=gpt-4o-mini
+TTS_PROVIDER=openai
+TTS_API_KEY=
+OPENAI_TTS_MODEL=gpt-4o-mini-tts
+OPENAI_TTS_VOICE=alloy
 TRANSCRIPTION_CHUNK_MB=24
 HIGHLIGHT_MIN_SECONDS=15
 HIGHLIGHT_MAX_SECONDS=60
+BLOG_IMAGE_MIN_COUNT=3
+BLOG_IMAGE_MAX_COUNT=8
+BLOG_FETCH_TIMEOUT_SECONDS=20
+
+# Frontend
+VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
+
+`TTS_API_KEY` is optional: if empty, `tts_service.py` falls back to
+`OPENAI_API_KEY`. `TTS_PROVIDER` currently only supports `openai`; the service
+function signatures are kept provider-agnostic so a future ElevenLabs backend
+can be added without changing callers in `clip_service.py`.
 
 ## Storage
 
 ```text
-backend/app/storage/uploads/<user_id>/<generated_uuid>.mp4
-backend/app/storage/temp/<user_id>/<stored_video_filename>.wav
-backend/app/storage/audio/
-backend/app/storage/transcripts/
-backend/app/storage/subtitles/
-backend/app/storage/outputs/
-backend/app/storage/tts/
+backend/app/storage/uploads/<user_id>/<generated_uuid>.mp4      original upload/import
+backend/app/storage/temp/<user_id>/<stored_video_filename>.wav  extracted audio (analyze step)
+backend/app/storage/outputs/<user_id>/<uuid>.mp4                rendered 9:16 clip
+backend/app/storage/outputs/<user_id>/<...>_subtitled.mp4       clip with subtitles burned in
+backend/app/storage/outputs/<user_id>/<...>_ai_narration.mp4    clip with AI narration audio
+backend/app/storage/subtitles/<user_id>/clip_<id>_<style>.ass   generated subtitle file
+backend/app/storage/tts/<user_id>/clip_<id>_<uuid>.mp3          generated narration audio
+backend/app/storage/audio/        reserved, currently unused
+backend/app/storage/transcripts/  reserved, currently unused
+backend/app/storage/blog/images/<user_id>/<blog_clip_id>/<uuid>.<ext>  downloaded blog images
+backend/app/storage/blog/outputs/<user_id>/<uuid>.mp4                  rendered slideshow
+backend/app/storage/blog/outputs/<user_id>/<...>_subtitled.mp4         slideshow with captions
+backend/app/storage/blog/subtitles/<user_id>/blog_<id>_<style>.ass     generated subtitle file
 ```
+
+## Known Limitations (Stage 13 review)
+
+- `docs/API_SPEC.md` is the source of truth for exact request/response shapes;
+  keep it in sync when endpoints change.
+- No real payment provider; plan changes are done by editing `users.plan`
+  directly in SQLite (see README "Usage Plans").
+- No admin UI, no automated tests, no CI pipeline yet.
+- `GET /videos/{video_id}/transcript` and `GET /videos/{video_id}/highlights`
+  are GET endpoints with side effects (see note above) — acceptable for the
+  MVP, worth revisiting before a public release.
+- There is no dedicated "my clips" list endpoint; clips are only reachable
+  through the highlight that created them.
+- `POST /blog-clips` runs its entire pipeline (scrape, download images, GPT
+  script, TTS, FFmpeg slideshow, subtitle burn-in) synchronously inside one
+  request — no background job/queue and no progress reporting yet. This is
+  the top priority follow-up before adding more blog-clip features; see
+  `docs/PROJECT_STATUS.md` for the planned roadmap.
+- Blog clips only support `blog.naver.com` URLs today; other blog platforms
+  are not scraped.
+- Blog clips use a single fixed narration voice/tone and a static per-image
+  slideshow (no pan/zoom animation, no scene-level editing after generation).

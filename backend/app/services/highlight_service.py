@@ -76,6 +76,7 @@ def _transcript_context(video_title: str, transcript_text: str, segments: list[d
 
 
 def _parse_highlight_json(raw_text: str) -> list[dict[str, Any]]:
+    print(f"[highlight_debug] raw GPT response: {raw_text}")
     try:
         payload = json.loads(raw_text)
     except json.JSONDecodeError as exc:
@@ -84,10 +85,12 @@ def _parse_highlight_json(raw_text: str) -> list[dict[str, Any]]:
     items = payload.get("highlights") if isinstance(payload, dict) else None
     if not isinstance(items, list):
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="GPT response did not include highlights array.")
+    print(f"[highlight_debug] GPT proposed {len(items)} raw candidate(s)")
 
     parsed: list[dict[str, Any]] = []
     for item in items:
         if not isinstance(item, dict):
+            print(f"[highlight_debug] skip: not a dict -> {item!r}")
             continue
         try:
             start_time = float(item["start_time"])
@@ -96,13 +99,19 @@ def _parse_highlight_json(raw_text: str) -> list[dict[str, Any]]:
             reason = str(item["reason"]).strip()
             content_type = str(item["content_type"]).strip()
             score = float(item["score"])
-        except (KeyError, TypeError, ValueError):
+        except (KeyError, TypeError, ValueError) as exc:
+            print(f"[highlight_debug] skip: missing/invalid field ({exc}) -> {item!r}")
             continue
 
         duration = end_time - start_time
         if start_time < 0 or duration < settings.highlight_min_seconds or duration > settings.highlight_max_seconds:
+            print(
+                f"[highlight_debug] skip: duration {duration:.1f}s out of "
+                f"[{settings.highlight_min_seconds}, {settings.highlight_max_seconds}] -> {item!r}"
+            )
             continue
         if not title or not reason:
+            print(f"[highlight_debug] skip: empty title/reason -> {item!r}")
             continue
         if content_type not in ALLOWED_CONTENT_TYPES:
             content_type = "후킹형"
@@ -118,8 +127,15 @@ def _parse_highlight_json(raw_text: str) -> list[dict[str, Any]]:
         )
 
     parsed = sorted(parsed, key=lambda value: value["score"], reverse=True)[:5]
-    if len(parsed) < 3:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="GPT returned too few valid highlight candidates.")
+    if not parsed:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "GPT could not find any highlight candidates matching the required "
+                f"{settings.highlight_min_seconds}-{settings.highlight_max_seconds} second range. "
+                "This can happen with very short or low-content transcripts."
+            ),
+        )
     return parsed
 
 
@@ -131,12 +147,21 @@ def _generate_highlights_with_openai(video_title: str, transcript_text: str, seg
     prompt = _transcript_context(video_title, transcript_text, segments)
     system_prompt = (
         "You recommend short-form video highlight clips from transcripts. "
-        "Return only valid JSON. Recommend 3 to 5 clips. Each clip must be 15 to 60 seconds. "
+        "Return only valid JSON. Recommend 3 to 5 clips.\n"
+        f"CRITICAL DURATION RULE: end_time minus start_time MUST be at least "
+        f"{settings.highlight_min_seconds} seconds and at most {settings.highlight_max_seconds} seconds. "
+        "A single short sentence (typically 5-10 seconds) is NOT long enough on its own. "
+        "You MUST span multiple consecutive transcript segments/sentences to reach at least "
+        f"{settings.highlight_min_seconds} seconds — pick a start segment and keep extending end_time forward "
+        "through following segments until the minimum duration is met, while still keeping the clip coherent. "
+        "Before returning each clip, double-check the subtraction yourself. If a candidate is too short, "
+        "extend end_time using nearby segments rather than discarding the idea.\n"
         "Use Korean titles and reasons. content_type must be one of: 정보형, 꿀팁형, 후킹형, 감정형, 논쟁형, 웃긴 장면. "
         "score must be 0 to 100."
     )
     user_prompt = (
         "Analyze this transcript and choose the best shorts candidates. "
+        f"Remember: every clip's (end_time - start_time) must be >= {settings.highlight_min_seconds} seconds. "
         "Return JSON exactly like: {\"highlights\":[{\"start_time\":0.0,\"end_time\":30.0,\"title\":\"...\",\"reason\":\"...\",\"content_type\":\"후킹형\",\"score\":90}]}\n\n"
         + prompt
     )

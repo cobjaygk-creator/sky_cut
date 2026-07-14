@@ -8,7 +8,15 @@ from fastapi import HTTPException, UploadFile, status
 
 from app.core.config import settings
 from app.db.models import Video
-from app.services.ffmpeg_service import FFmpegExtractionError, FFmpegNotAvailableError, extract_audio_to_wav
+from app.services.ffmpeg_service import (
+    FFmpegExtractionError,
+    FFmpegNotAvailableError,
+    FFmpegProbeError,
+    FFprobeNotAvailableError,
+    extract_audio_to_wav,
+    get_video_duration_seconds,
+)
+from app.services.usage_service import assert_can_analyze_video, increment_monthly_usage
 
 STORAGE_ROOT = Path(__file__).resolve().parents[1] / "storage"
 UPLOAD_ROOT = STORAGE_ROOT / "uploads"
@@ -251,6 +259,15 @@ def analyze_video_audio(conn: sqlite3.Connection, user_id: int, video_id: int) -
     if video.status not in {"uploaded", "failed", "audio_extracted", "transcribed"}:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Video is currently {video.status}.")
 
+    should_count_usage = video.status in {"uploaded", "failed"}
+    if should_count_usage:
+        try:
+            duration_seconds = get_video_duration_seconds(video.storage_path)
+        except (FFprobeNotAvailableError, FFmpegProbeError, TimeoutError) as exc:
+            update_video_status(conn, video.id, "failed", None, str(exc))
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+        assert_can_analyze_video(conn, user_id, duration_seconds)
+
     audio_dir = TEMP_ROOT / str(user_id)
     audio_path = audio_dir / f"{video.stored_filename}.wav"
     update_video_status(conn, video.id, "extracting_audio", video.audio_path, None)
@@ -265,6 +282,8 @@ def analyze_video_audio(conn: sqlite3.Connection, user_id: int, video_id: int) -
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected audio extraction failure.") from exc
 
     update_video_status(conn, video.id, "audio_extracted", str(audio_path), None)
+    if should_count_usage:
+        increment_monthly_usage(conn, user_id)
     refreshed = get_video_for_user(conn, user_id, video.id)
     if refreshed is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Video status refresh failed.")
