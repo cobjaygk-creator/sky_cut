@@ -11,17 +11,24 @@ export function VideoStyleStep({
 }: {
   blogClip: BlogClip;
   saving: boolean;
-  onSelect: (style: VisualStyleSlug | string) => Promise<void>;
+  onSelect: (
+    style: VisualStyleSlug | string,
+    copy: { style_title: string; style_subtitle: string },
+  ) => Promise<void>;
   onBack?: () => void;
   onMessage: (message: string) => void;
 }) {
   const [styles, setStyles] = useState<VisualStyle[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(blogClip.visual_style || "fullscreen");
+  const [titleDraft, setTitleDraft] = useState(blogClip.style_title || blogClip.blog_title || "");
+  const [subtitleDraft, setSubtitleDraft] = useState(blogClip.style_subtitle || "");
 
   useEffect(() => {
     setSelected(blogClip.visual_style || "fullscreen");
-  }, [blogClip.visual_style]);
+    setTitleDraft(blogClip.style_title || blogClip.blog_title || "");
+    setSubtitleDraft(blogClip.style_subtitle || "");
+  }, [blogClip.visual_style, blogClip.style_title, blogClip.style_subtitle, blogClip.blog_title]);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,7 +55,10 @@ export function VideoStyleStep({
 
   async function handleContinue() {
     try {
-      await onSelect(selected);
+      await onSelect(selected, {
+        style_title: titleDraft,
+        style_subtitle: subtitleDraft,
+      });
     } catch {
       /* parent surfaces error */
     }
@@ -58,7 +68,28 @@ export function VideoStyleStep({
     <section className="flow-card">
       <p className="create-kicker">퀵 모드 · 영상 스타일</p>
       <h1>영상 스타일을 선택해 주세요</h1>
-      <p className="flow-lead">퀵 모드용 레이아웃·자막 룩을 고른 뒤 보이스·BGM 설정으로 이어갑니다.</p>
+      <p className="flow-lead">상단 타이틀·보조설명을 정한 뒤 스타일을 고르면 보이스 설정으로 이어갑니다.</p>
+
+      <label className="style-copy-field">
+        상단 타이틀
+        <textarea
+          rows={2}
+          value={titleDraft}
+          disabled={saving}
+          onChange={(event) => setTitleDraft(event.target.value)}
+          placeholder="예: 밀양 숨겨진 숙소 추천"
+        />
+      </label>
+      <label className="style-copy-field">
+        보조 설명
+        <input
+          type="text"
+          value={subtitleDraft}
+          disabled={saving}
+          onChange={(event) => setSubtitleDraft(event.target.value)}
+          placeholder="예: 깔끔한 정보 전달"
+        />
+      </label>
 
       {loading ? <p className="create-note">스타일 불러오는 중…</p> : null}
 

@@ -267,6 +267,8 @@ def _create_blog_clips_table(conn: sqlite3.Connection) -> None:
             auto_sfx INTEGER NOT NULL DEFAULT 0,
             wizard_step TEXT,
             visual_style TEXT NOT NULL DEFAULT 'fullscreen',
+            style_title TEXT,
+            style_subtitle TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
@@ -337,6 +339,10 @@ def _migrate_blog_clips_table(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE blog_clips ADD COLUMN wizard_step TEXT")
     if "visual_style" not in columns:
         conn.execute("ALTER TABLE blog_clips ADD COLUMN visual_style TEXT NOT NULL DEFAULT 'fullscreen'")
+    if "style_title" not in columns:
+        conn.execute("ALTER TABLE blog_clips ADD COLUMN style_title TEXT")
+    if "style_subtitle" not in columns:
+        conn.execute("ALTER TABLE blog_clips ADD COLUMN style_subtitle TEXT")
     conn.execute("UPDATE blog_clips SET progress_stage = 'done', progress_percent = 100 WHERE status = 'completed' AND progress_percent < 100")
     _migrate_blog_clips_awaiting_script_status(conn)
     _migrate_blog_clips_awaiting_boards_status(conn)
@@ -349,6 +355,10 @@ def _migrate_blog_clips_table(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE blog_clips ADD COLUMN script_model TEXT NOT NULL DEFAULT 'gpt-4o-mini'")
     if "visual_style" not in columns:
         conn.execute("ALTER TABLE blog_clips ADD COLUMN visual_style TEXT NOT NULL DEFAULT 'fullscreen'")
+    if "style_title" not in columns:
+        conn.execute("ALTER TABLE blog_clips ADD COLUMN style_title TEXT")
+    if "style_subtitle" not in columns:
+        conn.execute("ALTER TABLE blog_clips ADD COLUMN style_subtitle TEXT")
 
 
 def _migrate_blog_clip_versions_table(conn: sqlite3.Connection) -> None:
@@ -399,6 +409,8 @@ def _migrate_blog_clips_awaiting_script_status(conn: sqlite3.Connection) -> None
         "auto_sfx",
         "wizard_step",
         "visual_style",
+        "style_title",
+        "style_subtitle",
         "created_at",
         "updated_at",
     ]
@@ -449,6 +461,8 @@ def _migrate_blog_clips_awaiting_boards_status(conn: sqlite3.Connection) -> None
         "auto_sfx",
         "wizard_step",
         "visual_style",
+        "style_title",
+        "style_subtitle",
         "created_at",
         "updated_at",
     ]
@@ -499,6 +513,8 @@ def _migrate_blog_clips_awaiting_images_status(conn: sqlite3.Connection) -> None
         "auto_sfx",
         "wizard_step",
         "visual_style",
+        "style_title",
+        "style_subtitle",
         "created_at",
         "updated_at",
     ]

@@ -18,7 +18,9 @@ export type VisualStyleSlug = "fullscreen" | "card_news" | "info_dark" | "bold_h
 
 export type BlogShortsStyleProps = {
   layout: "fullscreen" | "card";
-  caption: "bottom_box" | "card_title" | "dark_bar" | "bold_center";
+  caption: "bottom_box" | "card_title" | "card_bottom" | "dark_bar" | "bold_center";
+  header: "none" | "overlay" | "card_white" | "info_navy" | "viral_black";
+  accent: string;
   transitionSec: number;
   kenBurns: boolean;
 };
@@ -26,6 +28,10 @@ export type BlogShortsStyleProps = {
 export type BlogShortsProps = {
   blogClipId?: number | null;
   title?: string | null;
+  /** Top template title (editable) */
+  styleTitle?: string | null;
+  /** Top template subtitle / accent line (editable) */
+  styleSubtitle?: string | null;
   /** Fade overlap between boards in seconds */
   transitionSec?: number;
   source?: "dummy" | "blog_clip";
@@ -39,12 +45,16 @@ export type BlogShortsProps = {
 export const DEFAULT_BLOG_SHORTS_PROPS: BlogShortsProps = {
   blogClipId: null,
   title: "블로그 → 쇼츠 스파이크",
+  styleTitle: "블로그 → 쇼츠 스파이크",
+  styleSubtitle: "핵심만 짧게",
   transitionSec: 0.35,
   source: "dummy",
   visualStyle: "fullscreen",
   style: {
     layout: "fullscreen",
     caption: "bottom_box",
+    header: "overlay",
+    accent: "#FFE566",
     transitionSec: 0.35,
     kenBurns: true,
   },

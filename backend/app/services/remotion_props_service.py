@@ -165,11 +165,15 @@ def _props_from_boards(
             narration_url = f"clips/{blog_clip.id}/{dest_audio.name}"
 
     title = _pick_title(blog_clip)
+    style_title = (getattr(blog_clip, "style_title", None) or title or "").strip() or None
+    style_subtitle = (getattr(blog_clip, "style_subtitle", None) or "").strip() or None
     visual_style = normalize_visual_style(getattr(blog_clip, "visual_style", None))
     style = remotion_style_payload(visual_style)
     return {
         "blogClipId": blog_clip.id,
         "title": title,
+        "styleTitle": style_title,
+        "styleSubtitle": style_subtitle,
         "transitionSec": float(style.get("transitionSec", DEFAULT_TRANSITION_SEC)),
         "source": "blog_clip",
         "narrationUrl": narration_url,

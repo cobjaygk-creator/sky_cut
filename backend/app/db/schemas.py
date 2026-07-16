@@ -206,6 +206,8 @@ class BlogShortsBoardProps(BaseModel):
 class BlogShortsStyleProps(BaseModel):
     layout: str = "fullscreen"
     caption: str = "bottom_box"
+    header: str = "none"
+    accent: str = "#FFE566"
     transitionSec: float = 0.35
     kenBurns: bool = True
 
@@ -215,6 +217,8 @@ class BlogShortsPropsResponse(BaseModel):
 
     blogClipId: int | None = None
     title: str | None = None
+    styleTitle: str | None = None
+    styleSubtitle: str | None = None
     transitionSec: float = 0.35
     source: Literal["dummy", "blog_clip"] = "blog_clip"
     narrationUrl: str | None = None
@@ -266,6 +270,11 @@ class BlogClipWizardStepRequest(BaseModel):
 
 class BlogClipVisualStyleRequest(BaseModel):
     visual_style: VisualStyleSlug
+
+
+class BlogClipStyleCopyRequest(BaseModel):
+    style_title: str | None = None
+    style_subtitle: str | None = None
 
 
 class BlogClipTemplateApplyRequest(BaseModel):
@@ -430,6 +439,8 @@ class BlogClipResponse(BaseModel):
     auto_sfx: bool = False
     wizard_step: str | None = None
     visual_style: str = "fullscreen"
+    style_title: str | None = None
+    style_subtitle: str | None = None
     # Temporary debug/ops payload from the last successful render (engine, duration, …).
     render_spec: dict | None = None
     created_at: str

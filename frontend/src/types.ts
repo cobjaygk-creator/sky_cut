@@ -180,6 +180,8 @@ export type BlogClip = {
   auto_sfx: boolean;
   wizard_step: WizardBoardsStep | null;
   visual_style?: VisualStyleSlug | string;
+  style_title?: string | null;
+  style_subtitle?: string | null;
   render_spec?: RenderSpec | null;
   created_at: string;
   updated_at: string;

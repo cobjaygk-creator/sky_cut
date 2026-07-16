@@ -631,7 +631,8 @@ Request:
 
 `wizard_step` is one of `video_style`, `edit_mode`, `quick`, `ready`
 (legacy `boards`/`voice`/`style` coerce to `edit_mode`).  
-`select-script` seeds `wizard_step` to `video_style`.
+`select-script` seeds `wizard_step` to `edit_mode`.
+Quick path uses `edit_mode` → `video_style` → `quick`. Detail path picks style inside BoardEditor.
 
 Response `200`: `BlogClipResponse`.
 

@@ -40,8 +40,12 @@ export function MediaPanel({
   onAssignSpeaker,
   assigningSpeaker,
   appliedVisualStyle,
+  styleTitle,
+  styleSubtitle,
   onApplyVisualStyle,
+  onStyleCopyChange,
   applyingVisualStyle,
+  savingStyleCopy,
   onMessage,
   bgmAssetId,
   bgmVolume,
@@ -65,8 +69,12 @@ export function MediaPanel({
   onAssignSpeaker: (voiceId: string | null) => Promise<void>;
   assigningSpeaker: boolean;
   appliedVisualStyle?: string | null;
+  styleTitle?: string | null;
+  styleSubtitle?: string | null;
   onApplyVisualStyle: (style: string) => Promise<void>;
+  onStyleCopyChange: (body: { style_title?: string; style_subtitle?: string }) => Promise<void>;
   applyingVisualStyle: boolean;
+  savingStyleCopy: boolean;
   onMessage: (message: string) => void;
   bgmAssetId: number | null;
   bgmVolume: number;
@@ -365,8 +373,12 @@ export function MediaPanel({
       {tab === "style" ? (
         <VisualStylePanel
           appliedStyle={appliedVisualStyle}
+          styleTitle={styleTitle}
+          styleSubtitle={styleSubtitle}
           onApply={onApplyVisualStyle}
+          onStyleCopyChange={onStyleCopyChange}
           applying={applyingVisualStyle}
+          savingCopy={savingStyleCopy}
           onMessage={onMessage}
         />
       ) : null}

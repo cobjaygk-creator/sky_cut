@@ -19,6 +19,7 @@ from app.db.schemas import (
     BlogClipTtsSettingsRequest,
     BlogClipVersionCreateRequest,
     BlogClipVersionResponse,
+    BlogClipStyleCopyRequest,
     BlogClipVisualStyleRequest,
     BlogClipWizardStepRequest,
     BlogShortsPropsResponse,
@@ -71,6 +72,7 @@ from app.services.blog_service import (
     update_blog_clip_board,
     update_blog_clip_default_voice,
     update_blog_clip_tts_settings,
+    update_blog_clip_style_copy,
     update_blog_clip_visual_style,
     update_blog_clip_wizard_step,
 )
@@ -113,6 +115,8 @@ def _to_blog_clip_response(blog_clip: BlogClip) -> BlogClipResponse:
         auto_sfx=blog_clip.auto_sfx,
         wizard_step=blog_clip.wizard_step,
         visual_style=blog_clip.visual_style,
+        style_title=blog_clip.style_title,
+        style_subtitle=blog_clip.style_subtitle,
         render_spec=blog_clip_render_spec(blog_clip),
         created_at=blog_clip.created_at,
         updated_at=blog_clip.updated_at,
@@ -424,6 +428,26 @@ def update_blog_clip_visual_style_endpoint(
         current_user.id,
         blog_clip_id,
         request.visual_style,
+    )
+    return _to_blog_clip_response(blog_clip)
+
+
+@router.patch("/{blog_clip_id}/style-copy", response_model=BlogClipResponse)
+def update_blog_clip_style_copy_endpoint(
+    blog_clip_id: int,
+    request: BlogClipStyleCopyRequest,
+    current_user: User = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(get_connection),
+) -> BlogClipResponse:
+    payload = request.model_dump(exclude_unset=True)
+    blog_clip = update_blog_clip_style_copy(
+        conn,
+        current_user.id,
+        blog_clip_id,
+        style_title=payload.get("style_title"),
+        style_subtitle=payload.get("style_subtitle"),
+        title_set="style_title" in payload,
+        subtitle_set="style_subtitle" in payload,
     )
     return _to_blog_clip_response(blog_clip)
 

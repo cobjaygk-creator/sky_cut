@@ -36,6 +36,7 @@ export function BoardEditor({
   const [ttsSpeed, setTtsSpeed] = useState(blogClip.tts_speed ?? 1);
   const [visualStyle, setVisualStyle] = useState(blogClip.visual_style || "fullscreen");
   const [applyingVisualStyle, setApplyingVisualStyle] = useState(false);
+  const [savingStyleCopy, setSavingStyleCopy] = useState(false);
   const [bgmAssetId, setBgmAssetId] = useState<number | null>(blogClip.bgm_asset_id ?? null);
   const [bgmVolume, setBgmVolume] = useState(blogClip.bgm_volume ?? 0.3);
   const [audioSaving, setAudioSaving] = useState(false);
@@ -295,6 +296,24 @@ export function BoardEditor({
     }
   }
 
+  async function handleStyleCopyChange(body: { style_title?: string; style_subtitle?: string }) {
+    setSavingStyleCopy(true);
+    setError("");
+    try {
+      const updated = await authorizedRequest<BlogClip>(`/blog-clips/${blogClip.id}/style-copy`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      });
+      setClip(updated);
+      onClipUpdated?.(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "타이틀 저장에 실패했습니다.");
+      throw err;
+    } finally {
+      setSavingStyleCopy(false);
+    }
+  }
+
   async function handleBgmChange(nextBgmId: number | null, nextVolume?: number) {
     setAudioSaving(true);
     setError("");
@@ -463,8 +482,12 @@ export function BoardEditor({
             onAssignSpeaker={handleAssignSpeaker}
             assigningSpeaker={assigningSpeaker}
             appliedVisualStyle={visualStyle}
+            styleTitle={clip.style_title ?? clip.blog_title}
+            styleSubtitle={clip.style_subtitle}
             onApplyVisualStyle={handleApplyVisualStyle}
+            onStyleCopyChange={handleStyleCopyChange}
             applyingVisualStyle={applyingVisualStyle}
+            savingStyleCopy={savingStyleCopy}
             onMessage={onMessage}
             bgmAssetId={bgmAssetId}
             bgmVolume={bgmVolume}

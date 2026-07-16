@@ -9,6 +9,8 @@
   "properties": {
     "blogClipId": { "type": ["integer", "null"], "minimum": 1 },
     "title": { "type": ["string", "null"] },
+    "styleTitle": { "type": ["string", "null"] },
+    "styleSubtitle": { "type": ["string", "null"] },
     "transitionSec": { "type": "number", "minimum": 0, "maximum": 2, "default": 0.35 },
     "source": {
       "type": "string",
@@ -20,8 +22,7 @@
       "description": "Full TTS+BGM mix: http(s) URL or path relative to remotion/public for staticFile()"
     },
     "visualStyle": {
-      "type": ["string", "null"],
-      "enum": ["fullscreen", "card_news", "info_dark", "bold_hook", null]
+      "type": ["string", "null"]
     },
     "style": {
       "type": ["object", "null"],
@@ -30,8 +31,13 @@
         "layout": { "type": "string", "enum": ["fullscreen", "card"] },
         "caption": {
           "type": "string",
-          "enum": ["bottom_box", "card_title", "dark_bar", "bold_center"]
+          "enum": ["bottom_box", "card_title", "card_bottom", "dark_bar", "bold_center"]
         },
+        "header": {
+          "type": "string",
+          "enum": ["none", "overlay", "card_white", "info_navy", "viral_black"]
+        },
+        "accent": { "type": "string" },
         "transitionSec": { "type": "number", "minimum": 0, "maximum": 2 },
         "kenBurns": { "type": "boolean" }
       }

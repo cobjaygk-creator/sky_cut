@@ -17,10 +17,38 @@ export const BLOG_SHORTS_WIDTH = 1080;
 export const BLOG_SHORTS_HEIGHT = 1920;
 
 const STYLE_BY_VISUAL: Record<string, BlogShortsStyleProps> = {
-  fullscreen: { layout: "fullscreen", caption: "bottom_box", transitionSec: 0.35, kenBurns: true },
-  card_news: { layout: "card", caption: "card_title", transitionSec: 0.35, kenBurns: true },
-  info_dark: { layout: "fullscreen", caption: "dark_bar", transitionSec: 0.35, kenBurns: true },
-  bold_hook: { layout: "fullscreen", caption: "bold_center", transitionSec: 0.25, kenBurns: true },
+  fullscreen: {
+    layout: "fullscreen",
+    caption: "bottom_box",
+    header: "overlay",
+    accent: "#FFE566",
+    transitionSec: 0.35,
+    kenBurns: true,
+  },
+  card_news: {
+    layout: "card",
+    caption: "card_bottom",
+    header: "card_white",
+    accent: "#1f6b4a",
+    transitionSec: 0.35,
+    kenBurns: true,
+  },
+  info_dark: {
+    layout: "fullscreen",
+    caption: "dark_bar",
+    header: "info_navy",
+    accent: "#7CFFB2",
+    transitionSec: 0.35,
+    kenBurns: true,
+  },
+  bold_hook: {
+    layout: "fullscreen",
+    caption: "bold_center",
+    header: "viral_black",
+    accent: "#5EF2D0",
+    transitionSec: 0.25,
+    kenBurns: true,
+  },
 };
 
 /** Resolve API/http URLs or remotion/public-relative paths for <Img>. */
@@ -43,6 +71,8 @@ function resolveStyle(props: BlogShortsProps): BlogShortsStyleProps {
     return {
       layout: props.style.layout,
       caption: props.style.caption,
+      header: props.style.header ?? "none",
+      accent: props.style.accent ?? "#FFE566",
       transitionSec: props.style.transitionSec ?? props.transitionSec ?? 0.35,
       kenBurns: props.style.kenBurns ?? true,
     };
@@ -62,11 +92,6 @@ export function totalBlogShortsFrames(props: BlogShortsProps): number {
   return Math.max(FPS, lastStart + boardFrames(last.durationSec));
 }
 
-/**
- * Start frame (inclusive) for each board — used by Player seek-on-select.
- * Sequential (sum of TTS durations) so composition length matches narration audio.
- * Crossfades extend each Sequence into the next board without shortening the total.
- */
 export function boardStartFrames(props: BlogShortsProps): number[] {
   const boards = props.boards ?? [];
   const starts: number[] = [];
@@ -76,6 +101,168 @@ export function boardStartFrames(props: BlogShortsProps): number[] {
     cursor += boardFrames(board.durationSec);
   }
   return starts;
+}
+
+function StyleHeader({
+  header,
+  title,
+  subtitle,
+  accent,
+}: {
+  header: BlogShortsStyleProps["header"];
+  title?: string | null;
+  subtitle?: string | null;
+  accent: string;
+}) {
+  if (!title?.trim() || header === "none") return null;
+
+  if (header === "card_white") {
+    return (
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 5,
+          padding: "72px 48px 36px",
+          backgroundColor: "#ffffff",
+        }}
+      >
+        <div
+          style={{
+            color: "#151515",
+            fontSize: 46,
+            fontWeight: 900,
+            fontFamily: "Pretendard, Noto Sans KR, sans-serif",
+            lineHeight: 1.3,
+            letterSpacing: "-0.03em",
+          }}
+        >
+          {title}
+        </div>
+        {subtitle?.trim() ? (
+          <div
+            style={{
+              marginTop: 12,
+              color: accent,
+              fontSize: 32,
+              fontWeight: 700,
+              fontFamily: "Pretendard, Noto Sans KR, sans-serif",
+              lineHeight: 1.35,
+            }}
+          >
+            {subtitle}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (header === "info_navy") {
+    return (
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 5,
+          padding: "72px 48px 40px",
+          backgroundColor: "#0B1F3A",
+        }}
+      >
+        <div
+          style={{
+            color: "#ffffff",
+            fontSize: 44,
+            fontWeight: 850,
+            fontFamily: "Pretendard, Noto Sans KR, sans-serif",
+            lineHeight: 1.3,
+            letterSpacing: "-0.02em",
+          }}
+        >
+          {title}
+        </div>
+        {subtitle?.trim() ? (
+          <div
+            style={{
+              marginTop: 10,
+              color: accent,
+              fontSize: 34,
+              fontWeight: 700,
+              fontFamily: "Pretendard, Noto Sans KR, sans-serif",
+            }}
+          >
+            {subtitle}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (header === "viral_black") {
+    return (
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          zIndex: 5,
+          padding: "72px 48px 36px",
+          backgroundColor: "#000000",
+        }}
+      >
+        <div
+          style={{
+            color: "#ffffff",
+            fontSize: 44,
+            fontWeight: 900,
+            fontFamily: "Pretendard, Noto Sans KR, sans-serif",
+            lineHeight: 1.3,
+            letterSpacing: "-0.03em",
+          }}
+        >
+          {title}
+        </div>
+        {subtitle?.trim() ? (
+          <div
+            style={{
+              marginTop: 10,
+              color: accent,
+              fontSize: 34,
+              fontWeight: 800,
+              fontFamily: "Pretendard, Noto Sans KR, sans-serif",
+            }}
+          >
+            {subtitle}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  // overlay
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 96,
+        left: 56,
+        right: 56,
+        zIndex: 5,
+        color: "#ffffff",
+        fontFamily: "Pretendard, Noto Sans KR, sans-serif",
+        textShadow: "0 2px 14px rgba(0,0,0,0.55)",
+      }}
+    >
+      <div style={{ fontSize: 44, fontWeight: 900, lineHeight: 1.25, letterSpacing: "-0.02em" }}>{title}</div>
+      {subtitle?.trim() ? (
+        <div style={{ marginTop: 10, fontSize: 32, fontWeight: 700, color: accent }}>{subtitle}</div>
+      ) : null}
+    </div>
+  );
 }
 
 function CaptionBlock({
@@ -89,25 +276,26 @@ function CaptionBlock({
   captionY: number;
   captionOpacity: number;
 }) {
-  if (caption === "card_title") {
+  if (caption === "card_title" || caption === "card_bottom") {
     return (
       <div
         style={{
           position: "absolute",
           left: 48,
           right: 48,
-          bottom: 180,
+          bottom: caption === "card_bottom" ? 120 : 180,
           transform: `translateY(${captionY}px)`,
           opacity: captionOpacity,
+          zIndex: 4,
         }}
       >
         <div
           style={{
-            padding: "28px 28px 32px",
-            borderRadius: 28,
-            backgroundColor: "rgba(255,255,255,0.96)",
+            padding: "22px 26px",
+            borderRadius: caption === "card_bottom" ? 20 : 28,
+            backgroundColor: caption === "card_bottom" ? "rgba(255,255,255,0.96)" : "rgba(255,255,255,0.96)",
             color: "#151515",
-            fontSize: 46,
+            fontSize: caption === "card_bottom" ? 40 : 46,
             fontWeight: 800,
             fontFamily: "Pretendard, Noto Sans KR, sans-serif",
             lineHeight: 1.35,
@@ -133,6 +321,7 @@ function CaptionBlock({
           opacity: captionOpacity,
           padding: "40px 56px 220px",
           background: "linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.82) 45%, rgba(0,0,0,0.92) 100%)",
+          zIndex: 4,
         }}
       >
         <div
@@ -159,16 +348,17 @@ function CaptionBlock({
           position: "absolute",
           left: 48,
           right: 48,
-          top: "42%",
+          top: "46%",
           transform: `translateY(${captionY}px)`,
           opacity: captionOpacity,
           textAlign: "center",
+          zIndex: 4,
         }}
       >
         <div
           style={{
             color: "#ffffff",
-            fontSize: 64,
+            fontSize: 60,
             fontWeight: 900,
             fontFamily: "Pretendard, Noto Sans KR, sans-serif",
             lineHeight: 1.25,
@@ -182,7 +372,6 @@ function CaptionBlock({
     );
   }
 
-  // bottom_box (default)
   return (
     <div
       style={{
@@ -192,6 +381,7 @@ function CaptionBlock({
         bottom: 220,
         transform: `translateY(${captionY}px)`,
         opacity: captionOpacity,
+        zIndex: 4,
       }}
     >
       <div
@@ -220,14 +410,14 @@ function CaptionBlock({
 
 function BoardScene({
   board,
-  showTitle,
-  title,
+  styleTitle,
+  styleSubtitle,
   showCaption = true,
   style,
 }: {
   board: BlogBoardProps;
-  showTitle: boolean;
-  title?: string;
+  styleTitle?: string | null;
+  styleSubtitle?: string | null;
   showCaption?: boolean;
   style: BlogShortsStyleProps;
 }) {
@@ -252,32 +442,27 @@ function BoardScene({
   const bg = board.backgroundColor ?? "#222222";
   const imageSrc = resolveBoardImageSrc(board.imageUrl);
   const isCard = style.layout === "card";
+  const headerHeight = style.header === "card_white" || style.header === "info_navy" || style.header === "viral_black" ? 280 : 0;
 
   return (
-    <AbsoluteFill style={{ backgroundColor: isCard ? "#0f1115" : bg, overflow: "hidden" }}>
+    <AbsoluteFill style={{ backgroundColor: isCard ? "#f3f4f6" : bg, overflow: "hidden" }}>
       {isCard ? (
         <div
           style={{
             position: "absolute",
-            top: 120,
-            left: 48,
-            right: 48,
-            height: 980,
-            borderRadius: 32,
+            top: headerHeight + 24,
+            left: 40,
+            right: 40,
+            bottom: 280,
+            borderRadius: 28,
             overflow: "hidden",
             transform: `scale(${kenBurns})`,
-            boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
+            boxShadow: "0 18px 48px rgba(0,0,0,0.22)",
+            backgroundColor: "#222",
           }}
         >
           {imageSrc ? (
-            <Img
-              src={imageSrc}
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-              }}
-            />
+            <Img src={imageSrc} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
           ) : (
             <div
               style={{
@@ -321,24 +506,12 @@ function BoardScene({
         </>
       )}
 
-      {showTitle && title && style.caption !== "bold_center" ? (
-        <div
-          style={{
-            position: "absolute",
-            top: 96,
-            left: 64,
-            right: 64,
-            color: "#ffffff",
-            fontSize: 42,
-            fontWeight: 800,
-            fontFamily: "Pretendard, Noto Sans KR, sans-serif",
-            lineHeight: 1.25,
-            textShadow: "0 2px 12px rgba(0,0,0,0.45)",
-          }}
-        >
-          {title}
-        </div>
-      ) : null}
+      <StyleHeader
+        header={style.header}
+        title={styleTitle}
+        subtitle={styleSubtitle}
+        accent={style.accent}
+      />
 
       <CaptionBlock
         text={board.text}
@@ -355,6 +528,8 @@ export const BlogShorts: React.FC<BlogShortsProps> = (props) => {
   const transitionSec = props.transitionSec ?? style.transitionSec ?? 0.35;
   const transitionFrames = boardFrames(transitionSec);
   const boards = props.boards ?? [];
+  const styleTitle = props.styleTitle ?? props.title ?? null;
+  const styleSubtitle = props.styleSubtitle ?? null;
 
   const timeline = useMemo(() => {
     const items: {
@@ -384,8 +559,8 @@ export const BlogShorts: React.FC<BlogShortsProps> = (props) => {
         <Sequence key={index} from={from} durationInFrames={duration} name={`board-${index}`}>
           <FadingBoard
             board={board}
-            showTitle={index === 0}
-            title={props.title ?? undefined}
+            styleTitle={styleTitle}
+            styleSubtitle={styleSubtitle}
             transitionFrames={transitionFrames}
             spokenFrames={spoken}
             isFirst={index === 0}
@@ -400,8 +575,8 @@ export const BlogShorts: React.FC<BlogShortsProps> = (props) => {
 
 function FadingBoard({
   board,
-  showTitle,
-  title,
+  styleTitle,
+  styleSubtitle,
   transitionFrames,
   spokenFrames,
   isFirst,
@@ -409,8 +584,8 @@ function FadingBoard({
   style,
 }: {
   board: BlogBoardProps;
-  showTitle: boolean;
-  title?: string;
+  styleTitle?: string | null;
+  styleSubtitle?: string | null;
   transitionFrames: number;
   spokenFrames: number;
   isFirst: boolean;
@@ -444,8 +619,8 @@ function FadingBoard({
     <AbsoluteFill style={{ opacity: Math.min(fadeIn, fadeOut) }}>
       <BoardScene
         board={board}
-        showTitle={showTitle}
-        title={title}
+        styleTitle={styleTitle}
+        styleSubtitle={styleSubtitle}
         showCaption={showCaption}
         style={style}
       />

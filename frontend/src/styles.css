@@ -1420,6 +1420,26 @@ button.flow-stepper-item:hover {
   vertical-align: middle;
 }
 
+.style-copy-field {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.style-copy-field textarea,
+.style-copy-field input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  font-weight: 400;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
 .voice-gallery {
   display: grid;
   gap: 10px;

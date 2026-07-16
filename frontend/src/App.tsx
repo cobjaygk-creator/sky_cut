@@ -321,14 +321,24 @@ export function App() {
     }
   }
 
-  async function handleApplyVisualStyle(blogClip: BlogClip, visualStyle: string) {
+  async function handleApplyVisualStyle(
+    blogClip: BlogClip,
+    visualStyle: string,
+    copy?: { style_title?: string; style_subtitle?: string },
+  ) {
     setSavingVisualStyleId(blogClip.id);
     setUploadMessage("");
     try {
-      const updated = await authorizedRequest<BlogClip>(`/blog-clips/${blogClip.id}/visual-style`, {
+      let updated = await authorizedRequest<BlogClip>(`/blog-clips/${blogClip.id}/visual-style`, {
         method: "PATCH",
         body: JSON.stringify({ visual_style: visualStyle }),
       });
+      if (copy && (copy.style_title !== undefined || copy.style_subtitle !== undefined)) {
+        updated = await authorizedRequest<BlogClip>(`/blog-clips/${blogClip.id}/style-copy`, {
+          method: "PATCH",
+          body: JSON.stringify(copy),
+        });
+      }
       setBlogClips((current) => current.map((item) => (item.id === updated.id ? updated : item)));
     } catch (error) {
       setUploadMessage(error instanceof Error ? error.message : "영상 스타일 저장에 실패했습니다.");

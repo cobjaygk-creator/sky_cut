@@ -85,7 +85,11 @@ export function BlogClipFlow({
   onSelectScript: (blogClip: BlogClip, tone: ScriptTone) => void;
   onConfirmImages: (blogClip: BlogClip, imageIds: number[]) => void;
   onSaveDefaultVoice: (blogClip: BlogClip, voiceId: string, ttsSpeed: number) => Promise<void>;
-  onApplyVisualStyle: (blogClip: BlogClip, style: VisualStyleSlug | string) => Promise<void>;
+  onApplyVisualStyle: (
+    blogClip: BlogClip,
+    style: VisualStyleSlug | string,
+    copy?: { style_title?: string; style_subtitle?: string },
+  ) => Promise<void>;
   onAudioSettings: (
     blogClip: BlogClip,
     body: { auto_bgm?: boolean; auto_sfx?: boolean; bgm_asset_id?: number | null },
@@ -144,8 +148,11 @@ export function BlogClipFlow({
     if (index === 3) goToBoardsStep("edit_mode");
   }
 
-  async function handleQuickVisualStyleSelect(style: VisualStyleSlug | string) {
-    await onApplyVisualStyle(blogClip, style);
+  async function handleQuickVisualStyleSelect(
+    style: VisualStyleSlug | string,
+    copy: { style_title: string; style_subtitle: string },
+  ) {
+    await onApplyVisualStyle(blogClip, style, copy);
     setBoardsStep("quick");
     onWizardStepChange(blogClip, "quick");
   }

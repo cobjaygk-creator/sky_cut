@@ -197,6 +197,8 @@ def _row_to_blog_clip(row: sqlite3.Row) -> BlogClip:
             if "visual_style" in keys and row["visual_style"]
             else "fullscreen"
         ),
+        style_title=row["style_title"] if "style_title" in keys else None,
+        style_subtitle=row["style_subtitle"] if "style_subtitle" in keys else None,
         render_spec_json=row["render_spec_json"] if "render_spec_json" in keys else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -209,7 +211,7 @@ _BLOG_CLIP_COLUMNS = """
     progress_percent, error_message, title_candidates_json, description, hashtags_json,
     metadata_error, tts_speed, bgm_asset_id, bgm_volume, active_version_id, target_length,
     narration_language, script_model, default_voice, auto_bgm, auto_sfx, wizard_step, visual_style,
-    render_spec_json, created_at, updated_at
+    style_title, style_subtitle, render_spec_json, created_at, updated_at
 """
 
 
@@ -1281,6 +1283,43 @@ def update_blog_clip_visual_style(
     refreshed = get_blog_clip_for_user(conn, user_id, blog_clip_id)
     if refreshed is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Visual style update failed.")
+    return refreshed
+
+
+def update_blog_clip_style_copy(
+    conn: sqlite3.Connection,
+    user_id: int,
+    blog_clip_id: int,
+    *,
+    style_title: str | None = None,
+    style_subtitle: str | None = None,
+    title_set: bool = False,
+    subtitle_set: bool = False,
+) -> BlogClip:
+    blog_clip = get_blog_clip_for_user(conn, user_id, blog_clip_id)
+    if blog_clip is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog short not found.")
+    _require_awaiting_boards_for_mutation(blog_clip)
+    if not title_set and not subtitle_set:
+        return blog_clip
+    updates: list[str] = []
+    values: list[Any] = []
+    if title_set:
+        updates.append("style_title = ?")
+        values.append((style_title or "").strip() or None)
+    if subtitle_set:
+        updates.append("style_subtitle = ?")
+        values.append((style_subtitle or "").strip() or None)
+    updates.append("updated_at = CURRENT_TIMESTAMP")
+    values.append(blog_clip_id)
+    conn.execute(
+        f"UPDATE blog_clips SET {', '.join(updates)} WHERE id = ?",
+        values,
+    )
+    conn.commit()
+    refreshed = get_blog_clip_for_user(conn, user_id, blog_clip_id)
+    if refreshed is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Style copy update failed.")
     return refreshed
 
 
@@ -2587,6 +2626,7 @@ def select_blog_clip_script(conn: sqlite3.Connection, user_id: int, blog_clip_id
     _generate_initial_boards(conn, user_id, blog_clip_id, script)
 
     status_value, progress_stage, progress_percent = PROGRESS_AWAITING_BOARDS
+    seed_title = (blog_clip.blog_title or "").strip() or None
     conn.execute(
         """
         UPDATE blog_clips
@@ -2594,10 +2634,11 @@ def select_blog_clip_script(conn: sqlite3.Connection, user_id: int, blog_clip_id
             progress_stage = ?,
             progress_percent = ?,
             wizard_step = 'edit_mode',
+            style_title = COALESCE(NULLIF(TRIM(style_title), ''), ?),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,
-        (status_value, progress_stage, progress_percent, blog_clip_id),
+        (status_value, progress_stage, progress_percent, seed_title, blog_clip_id),
     )
     conn.commit()
 
