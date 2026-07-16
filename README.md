@@ -1,4 +1,4 @@
-﻿# New Cut
+# New Cut
 
 AI shorts creation SaaS MVP. This is a local-first prototype with two content
 pipelines:
@@ -53,7 +53,32 @@ Current capabilities:
 
 On this PC, use `npm.cmd` because PowerShell may block `npm.ps1`.
 
-## Backend Setup
+## Local stack (recommended)
+
+Blog final render defaults to **Remotion** (`BLOG_RENDER_ENGINE=remotion`).
+You need three processes: remotion-service, FastAPI, Vite.
+
+```powershell
+cd C:\Users\stkim\Documents\Codex\new_cut
+# once: remotion deps
+cd remotion; npm.cmd install; cd ..
+# start all three in separate windows
+powershell -ExecutionPolicy Bypass -File .\scripts\dev-up.ps1
+# after ~10s (wait for Remotion bundle)
+powershell -ExecutionPolicy Bypass -File .\scripts\health-check.ps1
+```
+
+```text
+Frontend:          http://127.0.0.1:5173
+API docs:          http://127.0.0.1:8000/docs
+Backend health:    http://127.0.0.1:8000/health   (includes remotion probe)
+Backend ready:     http://127.0.0.1:8000/ready    (503 if remotion down)
+Remotion health:   http://127.0.0.1:3100/health
+```
+
+If Remotion is down and `BLOG_RENDER_FFMPEG_FALLBACK=true`, blog renders fall back to FFmpeg.
+
+## Backend Setup (manual)
 
 ```powershell
 cd C:\Users\stkim\Documents\Codex\new_cut\backend
@@ -61,25 +86,20 @@ cd C:\Users\stkim\Documents\Codex\new_cut\backend
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Backend URLs:
+## Remotion service (manual)
 
-```text
-Health: http://127.0.0.1:8000/health
-API docs: http://127.0.0.1:8000/docs
+```powershell
+cd C:\Users\stkim\Documents\Codex\new_cut\remotion
+npm.cmd install
+npm.cmd run service
 ```
 
-## Frontend Setup
+## Frontend Setup (manual)
 
 ```powershell
 cd C:\Users\stkim\Documents\Codex\new_cut\frontend
 npm.cmd install
 npm.cmd run dev
-```
-
-Frontend URL:
-
-```text
-http://127.0.0.1:5173
 ```
 
 ## Environment Variables
@@ -96,10 +116,29 @@ TTS_PROVIDER=openai
 TTS_API_KEY=
 OPENAI_TTS_MODEL=gpt-4o-mini-tts
 OPENAI_TTS_VOICE=alloy
+# Typecast: set TTS_PROVIDER=typecast and TYPECAST_API_KEY (Free: 30k credits/mo)
+TYPECAST_API_KEY=
+TYPECAST_VOICE_ID=
+TYPECAST_LANGUAGE=kor
+PEXELS_API_KEY=
+BLOG_RENDER_ENGINE=remotion
+REMOTION_SERVICE_URL=http://127.0.0.1:3100
+REMOTION_RENDER_TIMEOUT_SECONDS=600
+BLOG_RENDER_FFMPEG_FALLBACK=true
 ```
 
 `TTS_API_KEY` is optional for OpenAI mode. If it is empty, the app uses
-`OPENAI_API_KEY` for TTS too. Keep real API keys only in `backend/.env`.
+`OPENAI_API_KEY` for TTS too. For Typecast, set `TTS_PROVIDER=typecast` and
+`TYPECAST_API_KEY` (or put the key in `TTS_API_KEY`). `GET /voices` then loads
+the Typecast catalog. `PEXELS_API_KEY` is required for board stock search
+(free key from https://www.pexels.com/api/). Keep real API keys only in
+`backend/.env`.
+
+Set `BLOG_RENDER_ENGINE=ffmpeg` to skip Remotion entirely.
+
+Phase-2 blog renders (TTS + Remotion/FFmpeg) are gated by an in-process queue
+(`BLOG_RENDER_MAX_CONCURRENT`, default `1`) so Chromium does not run in parallel
+on a laptop. Queue depth appears under `GET /health` → `render_queue`.
 
 
 ## Usage Plans
@@ -199,6 +238,14 @@ Blog clips (blog/article URL -> narrated shorts, no source video needed):
 POST /blog-clips
 GET /blog-clips
 GET /blog-clips/{blog_clip_id}
+POST /blog-clips/{blog_clip_id}/select-script
+GET /blog-clips/{blog_clip_id}/boards
+POST /blog-clips/{blog_clip_id}/boards
+PATCH /blog-clips/{blog_clip_id}/boards/{board_id}
+DELETE /blog-clips/{blog_clip_id}/boards/{board_id}
+GET /blog-clips/{blog_clip_id}/boards/{board_id}/image
+PUT /blog-clips/{blog_clip_id}/boards/reorder
+POST /blog-clips/{blog_clip_id}/render
 POST /blog-clips/{blog_clip_id}/metadata
 GET /blog-clips/{blog_clip_id}/metadata
 GET /blog-clips/{blog_clip_id}/download
@@ -266,14 +313,14 @@ POST /blog-clips returns "pending" but the video takes a while to finish
 
 ## Current Stage
 
-Stage 16 is complete: the original 13-stage video-clipping MVP (project
-skeleton, auth, upload, audio extraction, STT, highlight recommendation, clip
-generation, subtitles, preview/download, metadata generation, TTS narration,
-usage plans, and a full review) is implemented and locally verified, and the
-blog-clip pipeline (built after Stage 13) now runs asynchronously with
-progress polling (Stage 15) and accepts any blog/article URL, not just
-Naver (Stage 16). Real payment integration is intentionally not
-implemented. See `docs/PROJECT_STATUS.md` for the full stage history, known
-limitations, and the roadmap for growing the blog-clip pipeline into a
-SuperShorts-level product.
+Stage 19 is complete: the original 13-stage video-clipping MVP is
+implemented and locally verified, and the blog-clip pipeline now runs
+asynchronously (Stage 15), accepts any blog/article URL (Stage 16), pauses
+for summary/hook/detailed narration-tone selection (Stage 17), uses a
+board/scene model with CRUD/reorder plus a separate render step (Stage 18),
+and provides a 3-pane board editor frontend (Stage 19).
+Real payment integration is intentionally not implemented. See
+`docs/PROJECT_STATUS.md` for the full stage history, known limitations, and
+the roadmap for growing the blog-clip pipeline into a SuperShorts-level
+product.
 

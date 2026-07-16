@@ -9,6 +9,8 @@ venv/
 node_modules/
 dist/
 .vite/
+remotion/out/
+remotion/public/clips/
 
 # Environment
 .env

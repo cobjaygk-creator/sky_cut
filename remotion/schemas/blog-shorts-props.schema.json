@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://new-cut.local/schemas/blog-shorts-props.json",
+  "title": "BlogShortsProps",
+  "description": "Shared Remotion BlogShorts input contract (R1). Backend and remotion/ must stay in sync.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["boards"],
+  "properties": {
+    "blogClipId": { "type": ["integer", "null"], "minimum": 1 },
+    "title": { "type": ["string", "null"] },
+    "transitionSec": { "type": "number", "minimum": 0, "maximum": 2, "default": 0.35 },
+    "source": {
+      "type": "string",
+      "enum": ["dummy", "blog_clip"],
+      "default": "dummy"
+    },
+    "narrationUrl": {
+      "type": ["string", "null"],
+      "description": "Full TTS+BGM mix: http(s) URL or path relative to remotion/public for staticFile()"
+    },
+    "boards": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/board" }
+    }
+  },
+  "$defs": {
+    "board": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "durationSec"],
+      "properties": {
+        "boardId": { "type": ["integer", "null"], "minimum": 1 },
+        "imageUrl": {
+          "type": ["string", "null"],
+          "description": "http(s) URL or path relative to remotion/public for staticFile()"
+        },
+        "text": { "type": "string" },
+        "durationSec": { "type": "number", "exclusiveMinimum": 0, "maximum": 120 },
+        "backgroundColor": { "type": ["string", "null"] },
+        "speaker": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

@@ -11,16 +11,34 @@ users.
 ## How It Runs Today
 
 ```text
-Backend:  uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-Frontend: vite --host 127.0.0.1 (dev server on port 5173)
+Remotion: npm run service          → http://127.0.0.1:3100  (blog final render)
+Backend:  uvicorn app.main:app     → http://127.0.0.1:8000
+Frontend: vite                     → http://127.0.0.1:5173
 Database: single SQLite file, backend/new_cut.db
 Storage:  local folders under backend/app/storage/
 Secrets:  backend/.env (not committed to Git)
 ```
 
-See the README for exact commands. Both processes must be running at the
-same time and they only listen on `127.0.0.1`, so nothing outside this PC can
-reach them.
+Helper scripts (repo root):
+
+```text
+scripts/dev-up.ps1        Open three terminals (remotion + API + Vite)
+scripts/health-check.ps1  Probe :3100/health, :8000/health, :8000/ready
+```
+
+`GET /health` is liveness (always ok if API is up) and embeds a Remotion probe
+plus `render_queue` stats (`active` / `waiting` / `max_concurrent`).
+`GET /ready` returns **503** when `BLOG_RENDER_ENGINE=remotion` and the sidecar
+is down — use this before relying on blog final render. If Remotion fails mid-
+render and `BLOG_RENDER_FFMPEG_FALLBACK=true`, the pipeline logs a warning and
+falls back to FFmpeg slideshow+ASS.
+
+Phase-2 jobs (`POST .../render`, `POST .../versions`) share an in-process
+semaphore (`BLOG_RENDER_MAX_CONCURRENT`, default 1). This is per uvicorn worker
+only — multi-process hosting still needs an external queue later.
+
+See the README for exact commands. Processes only listen on `127.0.0.1`, so
+nothing outside this PC can reach them.
 
 ## Backup / Reset (Local)
 
@@ -80,9 +98,9 @@ This list is intentionally not implemented yet — it is a checklist for
   money per request and can fail with rate limits. The current error handling
   converts failures into clear HTTP errors already; for production, also add
   retry/backoff and per-user cost tracking/alerting.
-- `TTS_PROVIDER` is already abstracted behind `tts_service.py` so an
-  ElevenLabs (or other) backend can be added without touching
-  `clip_service.py`.
+- `TTS_PROVIDER` supports `openai` (default) and `typecast`. Set
+  `TYPECAST_API_KEY` (or `TTS_API_KEY`) when using Typecast. Callers still go
+  through `synthesize_openai_tts` in `tts_service.py`.
 
 ### 6. Authentication and payments
 
@@ -102,8 +120,9 @@ This list is intentionally not implemented yet — it is a checklist for
 - Build the frontend (`npm run build`) into static files and serve them from
   a CDN or static hosting, pointing `VITE_API_BASE_URL` at the real backend
   domain.
-- Add health checks (`GET /health` already exists) to your hosting platform's
-  liveness/readiness probes.
+- Add health checks: liveness `GET /health`, readiness `GET /ready` (requires
+  remotion-service when Remotion is the blog render engine). Run remotion-
+  service as a sibling process/container with Chromium deps.
 
 ### 8. Observability
 

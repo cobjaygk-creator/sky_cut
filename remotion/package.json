@@ -1,0 +1,31 @@
+{
+  "name": "new-cut-remotion",
+  "private": true,
+  "version": "0.1.0",
+  "description": "BlogShorts Remotion compositions + render sidecar for FastAPI",
+  "type": "module",
+  "scripts": {
+    "dev": "remotion studio",
+    "studio": "remotion studio",
+    "build": "remotion bundle",
+    "render": "remotion render BlogShorts out/blog-shorts-spike.mp4",
+    "service": "node server.mjs",
+    "sync-clip": "node scripts/sync-blog-clip.mjs",
+    "export-db": "python scripts/export_from_db.py",
+    "upgrade": "remotion upgrade"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.314",
+    "@remotion/cli": "4.0.314",
+    "@remotion/renderer": "4.0.314",
+    "express": "^4.21.2",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "remotion": "4.0.314"
+  },
+  "devDependencies": {
+    "@types/react": "19.0.2",
+    "@types/react-dom": "19.0.2",
+    "typescript": "5.7.2"
+  }
+}
