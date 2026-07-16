@@ -14,6 +14,15 @@ export type BlogBoardProps = {
   speaker?: string | null;
 };
 
+export type VisualStyleSlug = "fullscreen" | "card_news" | "info_dark" | "bold_hook";
+
+export type BlogShortsStyleProps = {
+  layout: "fullscreen" | "card";
+  caption: "bottom_box" | "card_title" | "dark_bar" | "bold_center";
+  transitionSec: number;
+  kenBurns: boolean;
+};
+
 export type BlogShortsProps = {
   blogClipId?: number | null;
   title?: string | null;
@@ -22,6 +31,8 @@ export type BlogShortsProps = {
   source?: "dummy" | "blog_clip";
   /** staticFile-relative or absolute URL for full narration (TTS/BGM mix) */
   narrationUrl?: string | null;
+  visualStyle?: VisualStyleSlug | string | null;
+  style?: BlogShortsStyleProps | null;
   boards: BlogBoardProps[];
 };
 
@@ -30,6 +41,13 @@ export const DEFAULT_BLOG_SHORTS_PROPS: BlogShortsProps = {
   title: "블로그 → 쇼츠 스파이크",
   transitionSec: 0.35,
   source: "dummy",
+  visualStyle: "fullscreen",
+  style: {
+    layout: "fullscreen",
+    caption: "bottom_box",
+    transitionSec: 0.35,
+    kenBurns: true,
+  },
   boards: [
     {
       text: "첫 3초, 훅으로 시선을 잡습니다",

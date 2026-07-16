@@ -8,11 +8,26 @@ export type TargetLength = "short" | "long";
 export type NarrationLanguage = "original" | "ko" | "en" | "ja";
 export type ScriptModel = "gpt-4o-mini" | "gpt-4o";
 export type TtsMode = "original_audio" | "ai_narration";
-export type WizardBoardsStep = "edit_mode" | "quick" | "ready";
+export type WizardBoardsStep = "video_style" | "edit_mode" | "quick" | "ready";
+export type VisualStyleSlug = "fullscreen" | "card_news" | "info_dark" | "bold_hook";
+
+export type VisualStyle = {
+  slug: VisualStyleSlug | string;
+  label: string;
+  description: string;
+  badge?: string | null;
+  previewImage?: string | null;
+  layout: string;
+  caption: string;
+  transitionSec: number;
+  kenBurns: boolean;
+};
 
 /** Normalize persisted wizard_step; legacy boards/voice/style → edit_mode. */
 export function parseWizardBoardsStep(value: string | null | undefined): WizardBoardsStep {
-  if (value === "quick" || value === "ready" || value === "edit_mode") return value;
+  if (value === "video_style" || value === "quick" || value === "ready" || value === "edit_mode") {
+    return value;
+  }
   // Legacy linear steps collapse into the new fork screen.
   if (value === "boards" || value === "voice" || value === "style") return "edit_mode";
   return "edit_mode";
@@ -164,6 +179,7 @@ export type BlogClip = {
   auto_bgm: boolean;
   auto_sfx: boolean;
   wizard_step: WizardBoardsStep | null;
+  visual_style?: VisualStyleSlug | string;
   render_spec?: RenderSpec | null;
   created_at: string;
   updated_at: string;

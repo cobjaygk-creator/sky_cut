@@ -205,6 +205,7 @@ class BlogClip:
     auto_bgm: bool
     auto_sfx: bool
     wizard_step: str | None
+    visual_style: str
     render_spec_json: str | None
     created_at: str
     updated_at: str

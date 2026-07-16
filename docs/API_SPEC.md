@@ -620,21 +620,43 @@ Response `200`: `BlogClipResponse`.
 
 ### `PATCH /blog-clips/{blog_clip_id}/wizard-step`
 
-Persist the client wizard sub-step while `status` is `awaiting_boards` (W5).
-Used so reopening a project from the workroom restores boards / voice / style.
+Persist the client wizard sub-step while `status` is `awaiting_boards`.
+Used so reopening a project from the workroom restores the flow step.
 
 Request:
 
 ```json
-{ "wizard_step": "voice" }
+{ "wizard_step": "video_style" }
 ```
 
-`wizard_step` is one of `boards`, `voice`, `style`.  
-`select-script` seeds `wizard_step` to `boards`.
+`wizard_step` is one of `video_style`, `edit_mode`, `quick`, `ready`
+(legacy `boards`/`voice`/`style` coerce to `edit_mode`).  
+`select-script` seeds `wizard_step` to `video_style`.
 
 Response `200`: `BlogClipResponse`.
 
 Errors: `404`, `409` not `awaiting_boards`, `400` invalid step.
+
+### `GET /visual-styles`
+
+List system visual style presets (Remotion layout/caption packs).
+
+Response `200`: array of
+`{ slug, label, description, badge, previewImage, layout, caption, transitionSec, kenBurns }`.
+
+### `PATCH /blog-clips/{blog_clip_id}/visual-style`
+
+Set Remotion visual style while `awaiting_boards`.
+
+Request:
+
+```json
+{ "visual_style": "card_news" }
+```
+
+`visual_style` is one of `fullscreen`, `card_news`, `info_dark`, `bold_hook`.
+
+Response `200`: `BlogClipResponse` with updated `visual_style`.
 
 ### `PATCH /blog-clips/{blog_clip_id}/template`
 
@@ -823,7 +845,8 @@ Response `200`: `BlogClipResponse`. `404` if not found or not owned by the curre
   "default_voice": "alloy",
   "auto_bgm": false,
   "auto_sfx": false,
-  "wizard_step": "voice",
+  "wizard_step": "video_style",
+  "visual_style": "fullscreen",
   "created_at": "...",
   "updated_at": "..."
 }
@@ -840,7 +863,8 @@ active output.
 influence Phase 1 GPT script candidates only.
 `default_voice` (W3) is the clip-level voice fallback; `auto_bgm` /
 `auto_sfx` (W4) are resolved at render start.
-`wizard_step` (W5) is the boards/voice/style sub-step while
+`visual_style` selects the Remotion layout/caption preset.
+`wizard_step` is the flow sub-step while
 `awaiting_boards` (null otherwise / earlier phases).
 
 `status` is one of: `pending`, `processing`, `awaiting_images`,

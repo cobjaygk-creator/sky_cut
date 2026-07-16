@@ -58,6 +58,7 @@ export function App() {
   const [confirmingImageSelectionId, setConfirmingImageSelectionId] = useState<number | null>(null);
   const [savingVoiceId, setSavingVoiceId] = useState<number | null>(null);
   const [savingStyleId, setSavingStyleId] = useState<number | null>(null);
+  const [savingVisualStyleId, setSavingVisualStyleId] = useState<number | null>(null);
   const [renderingFromFlowId, setRenderingFromFlowId] = useState<number | null>(null);
   const [editingBlogClipId, setEditingBlogClipId] = useState<number | null>(null);
   const [focusBlogClipId, setFocusBlogClipId] = useState<number | null>(null);
@@ -320,20 +321,20 @@ export function App() {
     }
   }
 
-  async function handleApplyTemplate(blogClip: BlogClip, templateId: number) {
-    setSavingStyleId(blogClip.id);
+  async function handleApplyVisualStyle(blogClip: BlogClip, visualStyle: string) {
+    setSavingVisualStyleId(blogClip.id);
     setUploadMessage("");
     try {
-      const updated = await authorizedRequest<BlogClip>(`/blog-clips/${blogClip.id}/template`, {
+      const updated = await authorizedRequest<BlogClip>(`/blog-clips/${blogClip.id}/visual-style`, {
         method: "PATCH",
-        body: JSON.stringify({ template_id: templateId }),
+        body: JSON.stringify({ visual_style: visualStyle }),
       });
       setBlogClips((current) => current.map((item) => (item.id === updated.id ? updated : item)));
     } catch (error) {
-      setUploadMessage(error instanceof Error ? error.message : "템플릿 적용에 실패했습니다.");
+      setUploadMessage(error instanceof Error ? error.message : "영상 스타일 저장에 실패했습니다.");
       throw error;
     } finally {
-      setSavingStyleId(null);
+      setSavingVisualStyleId(null);
     }
   }
 
@@ -719,6 +720,7 @@ export function App() {
           confirmingImageSelection={confirmingImageSelectionId === focusBlogClip.id}
           savingVoice={savingVoiceId === focusBlogClip.id}
           savingStyle={savingStyleId === focusBlogClip.id}
+          savingVisualStyle={savingVisualStyleId === focusBlogClip.id}
           renderingFromFlow={renderingFromFlowId === focusBlogClip.id}
           onBackToStudio={handleBackToStudio}
           onCopyText={handleCopyText}
@@ -727,7 +729,7 @@ export function App() {
           onSelectScript={handleSelectBlogScript}
           onConfirmImages={handleConfirmBlogImages}
           onSaveDefaultVoice={handleSaveDefaultVoice}
-          onApplyTemplate={handleApplyTemplate}
+          onApplyVisualStyle={handleApplyVisualStyle}
           onAudioSettings={handleAudioSettings}
           onWizardStepChange={handleWizardStepChange}
           onRender={handleRenderFromFlow}

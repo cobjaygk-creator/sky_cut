@@ -1,19 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { authorizedBlob, authorizedRequest } from "../api/client";
-import type { AudioAsset, BlogClip, SubtitleTemplate, Voice } from "../types";
-
-const TEMPLATE_HINTS: Record<string, string> = {
-  기본: "읽기 쉬운 표준 자막. 정보형·리뷰에 무난합니다.",
-  볼드: "굵고 강한 자막. 훅·강조 문장에 잘 맞습니다.",
-  쇼츠: "숏폼용 큰 자막. 모바일 세로 영상에 권장합니다.",
-};
+import type { AudioAsset, BlogClip, Voice } from "../types";
 
 export function QuickSettingsStep({
   blogClip,
   savingVoice,
   busy,
   onSaveDefaultVoice,
-  onApplyTemplate,
   onAudioSettings,
   onBack,
   onRender,
@@ -23,7 +16,6 @@ export function QuickSettingsStep({
   savingVoice: boolean;
   busy: boolean;
   onSaveDefaultVoice: (voiceId: string, ttsSpeed: number) => Promise<void>;
-  onApplyTemplate: (templateId: number) => Promise<void>;
   onAudioSettings: (body: {
     auto_bgm?: boolean;
     auto_sfx?: boolean;
@@ -34,7 +26,6 @@ export function QuickSettingsStep({
   onMessage: (message: string) => void;
 }) {
   const [voices, setVoices] = useState<Voice[]>([]);
-  const [templates, setTemplates] = useState<SubtitleTemplate[]>([]);
   const [bgmAssets, setBgmAssets] = useState<AudioAsset[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedVoice, setSelectedVoice] = useState(blogClip.default_voice ?? "");
@@ -54,13 +45,11 @@ export function QuickSettingsStep({
     setLoading(true);
     Promise.all([
       authorizedRequest<Voice[]>("/voices"),
-      authorizedRequest<SubtitleTemplate[]>("/subtitle-templates"),
       authorizedRequest<AudioAsset[]>("/audio-assets?kind=bgm"),
     ])
-      .then(([loadedVoices, tpl, bgm]) => {
+      .then(([loadedVoices, bgm]) => {
         if (cancelled) return;
         setVoices(loadedVoices);
-        setTemplates(tpl);
         setBgmAssets(bgm);
         setSelectedVoice((current) => {
           if (current && loadedVoices.some((voice) => voice.id === current)) return current;
@@ -135,10 +124,9 @@ export function QuickSettingsStep({
   return (
     <section className="flow-card">
       <p className="create-kicker">퀵 모드</p>
-      <h1>보이스와 스타일을 한 번에 정하세요</h1>
+      <h1>보이스와 오디오를 정하세요</h1>
       <p className="flow-lead">
-        기본값으로 빠르게 만든 뒤 <strong>프로젝트 만들기</strong>를 누르면 렌더가 시작됩니다. 세부는 나중에 보드
-        편집기에서 다듬을 수 있어요.
+        영상 스타일은 이전 단계에서 적용됩니다. 보이스·BGM을 고른 뒤 <strong>프로젝트 만들기</strong>를 누르세요.
       </p>
 
       {loading ? <p className="create-note">불러오는 중…</p> : null}
@@ -174,25 +162,6 @@ export function QuickSettingsStep({
                 {playingVoiceId === voice.id ? "재생 중…" : "미리듣기"}
               </button>
             </div>
-          ))}
-        </div>
-      </div>
-
-      <div>
-        <h2 className="image-section-title">자막 템플릿</h2>
-        <div className="template-scroller">
-          {templates.map((template) => (
-            <button
-              key={template.id}
-              type="button"
-              className={`template-chip ${blogClip.subtitle_template_id === template.id ? "is-selected" : ""}`}
-              disabled={blocked}
-              onClick={() => void onApplyTemplate(template.id)}
-              title={TEMPLATE_HINTS[template.name] ?? template.name}
-            >
-              <strong>{template.name}</strong>
-              <span className="muted">{template.is_system ? "시스템" : "내 템플릿"}</span>
-            </button>
           ))}
         </div>
       </div>

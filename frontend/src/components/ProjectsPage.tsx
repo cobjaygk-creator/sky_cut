@@ -14,6 +14,7 @@ import type {
 import { VideoList } from "./VideoList";
 
 const WIZARD_STEP_LABELS = {
+  video_style: "스타일",
   edit_mode: "편집",
   quick: "퀵설정",
   ready: "완료",

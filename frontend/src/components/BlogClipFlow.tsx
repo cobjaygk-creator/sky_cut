@@ -7,16 +7,18 @@ import {
   SCRIPT_TONES,
   SUBTITLE_STYLE_LABELS,
 } from "../constants";
-import type { BlogClip, ScriptTone, SubtitleStyle, WizardBoardsStep } from "../types";
+import type { BlogClip, ScriptTone, SubtitleStyle, VisualStyleSlug, WizardBoardsStep } from "../types";
 import { parseWizardBoardsStep } from "../types";
 import { BlogClipCard } from "./BlogClipCard";
 import { ImageSelectStep } from "./ImageSelectStep";
 import { QuickSettingsStep } from "./QuickSettingsStep";
+import { VideoStyleStep } from "./VideoStyleStep";
 
 const FLOW_STEPS = [
   { id: "progress", label: "준비" },
   { id: "images", label: "이미지" },
   { id: "script", label: "대본" },
+  { id: "style", label: "스타일" },
   { id: "edit", label: "편집" },
   { id: "done", label: "완료" },
 ] as const;
@@ -49,6 +51,7 @@ export function BlogClipFlow({
   confirmingImageSelection,
   savingVoice,
   savingStyle,
+  savingVisualStyle,
   renderingFromFlow,
   onBackToStudio,
   onCopyText,
@@ -57,7 +60,7 @@ export function BlogClipFlow({
   onSelectScript,
   onConfirmImages,
   onSaveDefaultVoice,
-  onApplyTemplate,
+  onApplyVisualStyle,
   onAudioSettings,
   onWizardStepChange,
   onRender,
@@ -74,6 +77,7 @@ export function BlogClipFlow({
   confirmingImageSelection: boolean;
   savingVoice: boolean;
   savingStyle: boolean;
+  savingVisualStyle: boolean;
   renderingFromFlow: boolean;
   onBackToStudio: () => void;
   onCopyText: (key: string, text: string) => void;
@@ -82,7 +86,7 @@ export function BlogClipFlow({
   onSelectScript: (blogClip: BlogClip, tone: ScriptTone) => void;
   onConfirmImages: (blogClip: BlogClip, imageIds: number[]) => void;
   onSaveDefaultVoice: (blogClip: BlogClip, voiceId: string, ttsSpeed: number) => Promise<void>;
-  onApplyTemplate: (blogClip: BlogClip, templateId: number) => Promise<void>;
+  onApplyVisualStyle: (blogClip: BlogClip, style: VisualStyleSlug | string) => Promise<void>;
   onAudioSettings: (
     blogClip: BlogClip,
     body: { auto_bgm?: boolean; auto_sfx?: boolean; bgm_asset_id?: number | null },
@@ -112,7 +116,7 @@ export function BlogClipFlow({
   const availableTones = SCRIPT_TONES.filter((tone) => Boolean(blogClip.script_candidates[tone]));
 
   const stepIndex = isFinalRender
-    ? 4
+    ? 5
     : isProgress
       ? 0
       : isAwaitingImages
@@ -120,13 +124,15 @@ export function BlogClipFlow({
         : isAwaitingScript
           ? 2
           : isAwaitingBoards
-            ? 3
+            ? boardsStep === "video_style"
+              ? 3
+              : 4
             : isCompleted || isFailed
-              ? 4
+              ? 5
               : 0;
 
   const stepperSteps = FLOW_STEPS.map((step, index) => {
-    if (index === 4 && isFinalRender) return { ...step, label: "렌더 중" };
+    if (index === 5 && isFinalRender) return { ...step, label: "렌더 중" };
     return step;
   });
 
@@ -138,7 +144,14 @@ export function BlogClipFlow({
 
   function handleStepperClick(index: number) {
     if (!isAwaitingBoards) return;
-    if (index === 3) goToBoardsStep("edit_mode");
+    if (index === 3) goToBoardsStep("video_style");
+    else if (index === 4) goToBoardsStep("edit_mode");
+  }
+
+  async function handleVisualStyleSelect(style: VisualStyleSlug | string) {
+    await onApplyVisualStyle(blogClip, style);
+    setBoardsStep("edit_mode");
+    onWizardStepChange(blogClip, "edit_mode");
   }
 
   return (
@@ -163,7 +176,7 @@ export function BlogClipFlow({
             {stepperSteps.map((step, index) => {
               const isCurrent = index === stepIndex;
               const isDone = index < stepIndex;
-              const canJump = isAwaitingBoards && index === 3;
+              const canJump = isAwaitingBoards && (index === 3 || index === 4);
               const className = `flow-stepper-item ${isCurrent ? "is-current" : ""} ${isDone ? "is-done" : ""} ${canJump ? "is-clickable" : ""}`;
               if (canJump) {
                 return (
@@ -250,6 +263,15 @@ export function BlogClipFlow({
             </section>
           ) : null}
 
+          {isAwaitingBoards && boardsStep === "video_style" ? (
+            <VideoStyleStep
+              blogClip={blogClip}
+              saving={savingVisualStyle}
+              onSelect={handleVisualStyleSelect}
+              onMessage={onMessage}
+            />
+          ) : null}
+
           {isAwaitingBoards && boardsStep === "edit_mode" ? (
             <section className="flow-card flow-boards-card">
               <p className="create-kicker">편집 모드</p>
@@ -259,6 +281,7 @@ export function BlogClipFlow({
                 <span>{boardCount ? `보드 ${boardCount}개` : "보드 준비됨"}</span>
                 <span>자막: {SUBTITLE_STYLE_LABELS[blogClip.subtitle_style as SubtitleStyle] ?? blogClip.subtitle_style}</span>
                 {blogClip.script_tone ? <span>톤: {SCRIPT_TONE_LABELS[blogClip.script_tone]}</span> : null}
+                {blogClip.visual_style ? <span>스타일: {blogClip.visual_style}</span> : null}
               </div>
               <div className="flow-step-actions">
                 <button className="ghost-button" type="button" onClick={() => goToBoardsStep("quick")}>
@@ -277,7 +300,6 @@ export function BlogClipFlow({
               savingVoice={savingVoice}
               busy={savingStyle || renderingFromFlow}
               onSaveDefaultVoice={(voiceId, ttsSpeed) => onSaveDefaultVoice(blogClip, voiceId, ttsSpeed)}
-              onApplyTemplate={(templateId) => onApplyTemplate(blogClip, templateId)}
               onAudioSettings={(body) => onAudioSettings(blogClip, body)}
               onBack={() => goToBoardsStep("edit_mode")}
               onRender={() => onRender(blogClip)}
@@ -294,6 +316,7 @@ export function BlogClipFlow({
                 <span>{boardCount ? `보드 ${boardCount}개` : "보드"}</span>
                 <span>보이스: {blogClip.default_voice ?? "기본"}</span>
                 <span>{bgmSummary(blogClip)}</span>
+                {blogClip.visual_style ? <span>스타일: {blogClip.visual_style}</span> : null}
                 {blogClip.auto_sfx ? <span>자동 SFX</span> : null}
               </div>
               <div className="flow-step-actions">

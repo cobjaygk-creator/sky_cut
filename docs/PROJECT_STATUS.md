@@ -1,16 +1,19 @@
 # Project Status
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 Project root: `C:\Users\stkim\Documents\Codex\new_cut` (branch `sky_cut` — see
 "Branching" below)
 
 ## Current Stage
 
-**W5 (wizard polish) — complete.**
+**Visual style gallery — shipped (A+1).**
 
-Stage 25 Remotion evaluation remains deferred. Wizard design lives in
-`docs/WIZARD_DESIGN.md`. Coding stages **W1–W5** are done: create options,
-image select, voice, style/audio, side stepper + `wizard_step` restore.
+Flow after script: `video_style` → `edit_mode` (quick|detail) → render.
+`blog_clips.visual_style` drives Remotion layout/caption presets
+(`fullscreen|card_news|info_dark|bold_hook`). ASS subtitle templates remain
+for FFmpeg fallback only; quick mode no longer picks template chips.
+
+Prior: W5 wizard polish complete (`docs/WIZARD_DESIGN.md`).
 
 All 13 planned stages of the original local MVP are implemented, plus twelve
 follow-up stages on the blog-clip pipeline (Stage 25 is docs-only — no
@@ -109,19 +112,25 @@ Stages 17–24 APIs.
   clears `auto_bgm`
 - `pick_default_bgm(tone, length)` / `pick_default_sfx()` applied in
   `start_blog_clip_render` (SFX on boards after the first)
-- Flow: boards → voice → style; **프로젝트 만들기** = `POST .../render`
-- BoardEditor primary CTA is “편집 완료”; render demoted to secondary
+- Flow (current): script → video_style → edit_mode → quick|detail → render
+- BoardEditor primary CTA is “편집 완료”; close → `ready`; render demoted to secondary
 
 #### W5 details: stepper polish + restore
 
-- DB: `blog_clips.wizard_step` (`boards`\|`voice`\|`style`)
+- DB: `blog_clips.wizard_step` (`video_style`\|`edit_mode`\|`quick`\|`ready`)
 - API: `PATCH /blog-clips/{id}/wizard-step`
-- `select-script` seeds `wizard_step = boards`
-- Frontend: vertical side stepper (horizontal on mobile); boards/voice/style
-  clickable while `awaiting_boards`; reopen from workroom restores step
+- `select-script` seeds `wizard_step = video_style`
+- Frontend stepper: 준비→이미지→대본→스타일→편집→완료
 - Workroom row shows current wizard sub-step label
 
-Out of scope still: Remotion packs, credits UI, my-voice, intro board.
+#### Visual style details
+
+- DB: `blog_clips.visual_style` (default `fullscreen`)
+- `GET /visual-styles`, `PATCH /blog-clips/{id}/visual-style`
+- Remotion props: `visualStyle` + resolved `style{layout,caption,transitionSec,kenBurns}`
+- Out of scope: style packs with voice/BGM, custom styles, FFmpeg layout parity
+
+Out of scope still: credits UI, my-voice, intro board.
 
 ## Branching
 

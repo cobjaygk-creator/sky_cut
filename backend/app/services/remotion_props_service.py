@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 
 from app.core.config import settings
 from app.db.models import BlogClip, BlogClipBoard
+from app.services.visual_style_catalog import normalize_visual_style, remotion_style_payload
 
 DEFAULT_BOARD_DURATION_SEC = 2.5
 DEFAULT_TRANSITION_SEC = 0.35
@@ -164,12 +165,16 @@ def _props_from_boards(
             narration_url = f"clips/{blog_clip.id}/{dest_audio.name}"
 
     title = _pick_title(blog_clip)
+    visual_style = normalize_visual_style(getattr(blog_clip, "visual_style", None))
+    style = remotion_style_payload(visual_style)
     return {
         "blogClipId": blog_clip.id,
         "title": title,
-        "transitionSec": DEFAULT_TRANSITION_SEC,
+        "transitionSec": float(style.get("transitionSec", DEFAULT_TRANSITION_SEC)),
         "source": "blog_clip",
         "narrationUrl": narration_url,
+        "visualStyle": visual_style,
+        "style": style,
         "boards": board_props,
     }
 

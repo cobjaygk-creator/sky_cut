@@ -70,7 +70,7 @@ ALLOWED_SCRIPT_TONES = ("summary", "hook", "detailed")
 ALLOWED_TARGET_LENGTHS = {"short", "long"}
 ALLOWED_NARRATION_LANGUAGES = {"original", "ko", "en", "ja"}
 ALLOWED_SCRIPT_MODELS = {"gpt-4o-mini", "gpt-4o"}
-ALLOWED_WIZARD_STEPS = {"edit_mode", "quick", "ready", "boards", "voice", "style"}
+ALLOWED_WIZARD_STEPS = {"video_style", "edit_mode", "quick", "ready", "boards", "voice", "style"}
 LEGACY_WIZARD_STEPS = {"boards", "voice", "style"}
 
 
@@ -192,6 +192,11 @@ def _row_to_blog_clip(row: sqlite3.Row) -> BlogClip:
         auto_bgm=bool(row["auto_bgm"]) if "auto_bgm" in keys and row["auto_bgm"] is not None else False,
         auto_sfx=bool(row["auto_sfx"]) if "auto_sfx" in keys and row["auto_sfx"] is not None else False,
         wizard_step=_normalize_wizard_step(row["wizard_step"] if "wizard_step" in keys else None),
+        visual_style=(
+            row["visual_style"]
+            if "visual_style" in keys and row["visual_style"]
+            else "fullscreen"
+        ),
         render_spec_json=row["render_spec_json"] if "render_spec_json" in keys else None,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
@@ -203,8 +208,8 @@ _BLOG_CLIP_COLUMNS = """
     subtitle_style, subtitle_template_id, video_path, subtitled_video_path, status, progress_stage,
     progress_percent, error_message, title_candidates_json, description, hashtags_json,
     metadata_error, tts_speed, bgm_asset_id, bgm_volume, active_version_id, target_length,
-    narration_language, script_model, default_voice, auto_bgm, auto_sfx, wizard_step, render_spec_json,
-    created_at, updated_at
+    narration_language, script_model, default_voice, auto_bgm, auto_sfx, wizard_step, visual_style,
+    render_spec_json, created_at, updated_at
 """
 
 
@@ -1068,10 +1073,10 @@ def update_blog_clip_wizard_step(
     step = (wizard_step or "").strip().lower()
     if step in LEGACY_WIZARD_STEPS:
         step = "edit_mode"
-    if step not in ALLOWED_WIZARD_STEPS:
+    if step not in ALLOWED_WIZARD_STEPS - LEGACY_WIZARD_STEPS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="wizard_step must be edit_mode, quick, or ready.",
+            detail="wizard_step must be video_style, edit_mode, quick, or ready.",
         )
     conn.execute(
         """
@@ -1242,6 +1247,40 @@ def apply_blog_clip_template(
     refreshed = get_blog_clip_for_user(conn, user_id, blog_clip_id)
     if refreshed is None:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Template apply failed.")
+    return refreshed
+
+
+def update_blog_clip_visual_style(
+    conn: sqlite3.Connection,
+    user_id: int,
+    blog_clip_id: int,
+    visual_style: str,
+) -> BlogClip:
+    from app.services.visual_style_catalog import ALLOWED_VISUAL_STYLES, normalize_visual_style
+
+    blog_clip = get_blog_clip_for_user(conn, user_id, blog_clip_id)
+    if blog_clip is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog short not found.")
+    _require_awaiting_boards_for_mutation(blog_clip)
+    slug = (visual_style or "").strip().lower()
+    if slug not in ALLOWED_VISUAL_STYLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="visual_style must be fullscreen, card_news, info_dark, or bold_hook.",
+        )
+    slug = normalize_visual_style(slug)
+    conn.execute(
+        """
+        UPDATE blog_clips
+        SET visual_style = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (slug, blog_clip_id),
+    )
+    conn.commit()
+    refreshed = get_blog_clip_for_user(conn, user_id, blog_clip_id)
+    if refreshed is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Visual style update failed.")
     return refreshed
 
 
@@ -2554,7 +2593,7 @@ def select_blog_clip_script(conn: sqlite3.Connection, user_id: int, blog_clip_id
         SET status = ?,
             progress_stage = ?,
             progress_percent = ?,
-            wizard_step = 'edit_mode',
+            wizard_step = 'video_style',
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,

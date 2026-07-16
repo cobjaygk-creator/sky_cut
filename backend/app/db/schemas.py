@@ -203,6 +203,13 @@ class BlogShortsBoardProps(BaseModel):
     speaker: str | None = None
 
 
+class BlogShortsStyleProps(BaseModel):
+    layout: str = "fullscreen"
+    caption: str = "bottom_box"
+    transitionSec: float = 0.35
+    kenBurns: bool = True
+
+
 class BlogShortsPropsResponse(BaseModel):
     """Remotion BlogShorts props exported from a blog clip."""
 
@@ -211,6 +218,8 @@ class BlogShortsPropsResponse(BaseModel):
     transitionSec: float = 0.35
     source: Literal["dummy", "blog_clip"] = "blog_clip"
     narrationUrl: str | None = None
+    visualStyle: str = "fullscreen"
+    style: BlogShortsStyleProps | None = None
     boards: list[BlogShortsBoardProps]
 
 
@@ -247,11 +256,16 @@ class BlogClipDefaultVoiceRequest(BaseModel):
     apply_to_all_boards: bool = True
 
 
-WizardStep = Literal["edit_mode", "quick", "ready", "boards", "voice", "style"]
+WizardStep = Literal["video_style", "edit_mode", "quick", "ready", "boards", "voice", "style"]
+VisualStyleSlug = Literal["fullscreen", "card_news", "info_dark", "bold_hook"]
 
 
 class BlogClipWizardStepRequest(BaseModel):
     wizard_step: WizardStep
+
+
+class BlogClipVisualStyleRequest(BaseModel):
+    visual_style: VisualStyleSlug
 
 
 class BlogClipTemplateApplyRequest(BaseModel):
@@ -415,6 +429,7 @@ class BlogClipResponse(BaseModel):
     auto_bgm: bool = False
     auto_sfx: bool = False
     wizard_step: str | None = None
+    visual_style: str = "fullscreen"
     # Temporary debug/ops payload from the last successful render (engine, duration, …).
     render_spec: dict | None = None
     created_at: str

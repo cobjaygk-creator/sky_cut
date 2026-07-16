@@ -19,6 +19,7 @@ from app.db.schemas import (
     BlogClipTtsSettingsRequest,
     BlogClipVersionCreateRequest,
     BlogClipVersionResponse,
+    BlogClipVisualStyleRequest,
     BlogClipWizardStepRequest,
     BlogShortsPropsResponse,
     BoardCreateRequest,
@@ -70,6 +71,7 @@ from app.services.blog_service import (
     update_blog_clip_board,
     update_blog_clip_default_voice,
     update_blog_clip_tts_settings,
+    update_blog_clip_visual_style,
     update_blog_clip_wizard_step,
 )
 from app.services.remotion_props_service import build_blog_shorts_props
@@ -110,6 +112,7 @@ def _to_blog_clip_response(blog_clip: BlogClip) -> BlogClipResponse:
         auto_bgm=blog_clip.auto_bgm,
         auto_sfx=blog_clip.auto_sfx,
         wizard_step=blog_clip.wizard_step,
+        visual_style=blog_clip.visual_style,
         render_spec=blog_clip_render_spec(blog_clip),
         created_at=blog_clip.created_at,
         updated_at=blog_clip.updated_at,
@@ -406,6 +409,22 @@ def apply_blog_clip_template_endpoint(
     conn: sqlite3.Connection = Depends(get_connection),
 ) -> BlogClipResponse:
     blog_clip = apply_blog_clip_template(conn, current_user.id, blog_clip_id, request.template_id)
+    return _to_blog_clip_response(blog_clip)
+
+
+@router.patch("/{blog_clip_id}/visual-style", response_model=BlogClipResponse)
+def update_blog_clip_visual_style_endpoint(
+    blog_clip_id: int,
+    request: BlogClipVisualStyleRequest,
+    current_user: User = Depends(get_current_user),
+    conn: sqlite3.Connection = Depends(get_connection),
+) -> BlogClipResponse:
+    blog_clip = update_blog_clip_visual_style(
+        conn,
+        current_user.id,
+        blog_clip_id,
+        request.visual_style,
+    )
     return _to_blog_clip_response(blog_clip)
 
 

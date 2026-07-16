@@ -19,6 +19,23 @@
       "type": ["string", "null"],
       "description": "Full TTS+BGM mix: http(s) URL or path relative to remotion/public for staticFile()"
     },
+    "visualStyle": {
+      "type": ["string", "null"],
+      "enum": ["fullscreen", "card_news", "info_dark", "bold_hook", null]
+    },
+    "style": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "layout": { "type": "string", "enum": ["fullscreen", "card"] },
+        "caption": {
+          "type": "string",
+          "enum": ["bottom_box", "card_title", "dark_bar", "bold_center"]
+        },
+        "transitionSec": { "type": "number", "minimum": 0, "maximum": 2 },
+        "kenBurns": { "type": "boolean" }
+      }
+    },
     "boards": {
       "type": "array",
       "minItems": 1,
