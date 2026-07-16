@@ -702,6 +702,9 @@ export function App() {
         blogClip={editingBlogClip}
         onClose={handleCloseBoardEditor}
         onRendered={handleBoardEditorRendered}
+        onClipUpdated={(updated) => {
+          setBlogClips((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+        }}
         onMessage={setUploadMessage}
       />
     );

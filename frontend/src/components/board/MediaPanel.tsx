@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { authorizedBlob, authorizedRequest } from "../../api/client";
 import type { Board, StockSearchResponse, Voice } from "../../types";
 import { BgmPanel } from "./BgmPanel";
-import { TemplatePanel } from "./TemplatePanel";
+import { VisualStylePanel } from "../VisualStylePanel";
 import { useBoardImageUrl } from "./useBoardImageUrl";
 
-type MediaTab = "media" | "template" | "voice" | "bgm";
+type MediaTab = "media" | "style" | "voice" | "bgm";
 
 function MediaThumb({
   blogClipId,
@@ -39,9 +39,10 @@ export function MediaPanel({
   onTtsSpeedChange,
   onAssignSpeaker,
   assigningSpeaker,
-  appliedTemplateId,
-  onApplyTemplate,
-  applyingTemplate,
+  appliedVisualStyle,
+  onApplyVisualStyle,
+  applyingVisualStyle,
+  onMessage,
   bgmAssetId,
   bgmVolume,
   onBgmChange,
@@ -63,9 +64,10 @@ export function MediaPanel({
   onTtsSpeedChange: (speed: number) => void;
   onAssignSpeaker: (voiceId: string | null) => Promise<void>;
   assigningSpeaker: boolean;
-  appliedTemplateId: number | null;
-  onApplyTemplate: (templateId: number) => Promise<void>;
-  applyingTemplate: boolean;
+  appliedVisualStyle?: string | null;
+  onApplyVisualStyle: (style: string) => Promise<void>;
+  applyingVisualStyle: boolean;
+  onMessage: (message: string) => void;
   bgmAssetId: number | null;
   bgmVolume: number;
   onBgmChange: (bgmAssetId: number | null, bgmVolume?: number) => Promise<void>;
@@ -220,7 +222,7 @@ export function MediaPanel({
         {(
           [
             ["media", "미디어"],
-            ["template", "템플릿"],
+            ["style", "스타일"],
             ["voice", "음성"],
             ["bgm", "BGM"],
           ] as const
@@ -360,8 +362,13 @@ export function MediaPanel({
         </div>
       ) : null}
 
-      {tab === "template" ? (
-        <TemplatePanel appliedTemplateId={appliedTemplateId} onApply={onApplyTemplate} applying={applyingTemplate} />
+      {tab === "style" ? (
+        <VisualStylePanel
+          appliedStyle={appliedVisualStyle}
+          onApply={onApplyVisualStyle}
+          applying={applyingVisualStyle}
+          onMessage={onMessage}
+        />
       ) : null}
 
       {tab === "bgm" ? (

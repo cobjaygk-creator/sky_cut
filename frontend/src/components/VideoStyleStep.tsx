@@ -6,11 +6,13 @@ export function VideoStyleStep({
   blogClip,
   saving,
   onSelect,
+  onBack,
   onMessage,
 }: {
   blogClip: BlogClip;
   saving: boolean;
   onSelect: (style: VisualStyleSlug | string) => Promise<void>;
+  onBack?: () => void;
   onMessage: (message: string) => void;
 }) {
   const [styles, setStyles] = useState<VisualStyle[]>([]);
@@ -54,9 +56,9 @@ export function VideoStyleStep({
 
   return (
     <section className="flow-card">
-      <p className="create-kicker">영상 스타일</p>
+      <p className="create-kicker">퀵 모드 · 영상 스타일</p>
       <h1>영상 스타일을 선택해 주세요</h1>
-      <p className="flow-lead">대본에 맞는 레이아웃·자막 룩을 고른 뒤 편집으로 이어갑니다.</p>
+      <p className="flow-lead">퀵 모드용 레이아웃·자막 룩을 고른 뒤 보이스·BGM 설정으로 이어갑니다.</p>
 
       {loading ? <p className="create-note">스타일 불러오는 중…</p> : null}
 
@@ -85,8 +87,13 @@ export function VideoStyleStep({
       </div>
 
       <div className="flow-step-actions">
+        {onBack ? (
+          <button className="ghost-button" type="button" disabled={saving} onClick={onBack}>
+            ← 편집 모드
+          </button>
+        ) : null}
         <button className="cta-button flow-primary-cta" type="button" disabled={saving || loading} onClick={() => void handleContinue()}>
-          {saving ? "저장 중…" : "이 스타일로 계속"}
+          {saving ? "저장 중…" : "다음 · 보이스/오디오"}
         </button>
       </div>
     </section>

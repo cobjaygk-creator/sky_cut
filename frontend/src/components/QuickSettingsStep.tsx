@@ -223,7 +223,7 @@ export function QuickSettingsStep({
 
       <div className="flow-step-actions">
         <button className="ghost-button" type="button" onClick={onBack} disabled={blocked}>
-          ← 편집 모드
+          ← 스타일
         </button>
         <button className="cta-button flow-primary-cta" type="button" disabled={blocked} onClick={() => void handleRender()}>
           {submitting || busy ? "시작 중…" : "프로젝트 만들기"}

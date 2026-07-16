@@ -2593,7 +2593,7 @@ def select_blog_clip_script(conn: sqlite3.Connection, user_id: int, blog_clip_id
         SET status = ?,
             progress_stage = ?,
             progress_percent = ?,
-            wizard_step = 'video_style',
+            wizard_step = 'edit_mode',
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         """,

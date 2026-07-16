@@ -1364,6 +1364,62 @@ button.flow-stepper-item:hover {
   background: radial-gradient(circle at 50% 45%, #4a6078, #12151a 70%);
 }
 
+.visual-style-list {
+  display: grid;
+  gap: 10px;
+}
+
+.visual-style-row {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+
+.visual-style-row.is-selected {
+  border-color: #2f6fed;
+  box-shadow: 0 0 0 1px rgba(47, 111, 237, 0.35);
+}
+
+.visual-style-row-preview {
+  width: 48px;
+  height: 72px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #1a1d22;
+}
+
+.visual-style-row-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.visual-style-row-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.visual-style-row-badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #2f6fed;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
 .voice-gallery {
   display: grid;
   gap: 10px;

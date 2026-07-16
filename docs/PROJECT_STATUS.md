@@ -8,10 +8,9 @@ Project root: `C:\Users\stkim\Documents\Codex\new_cut` (branch `sky_cut` — see
 
 **Visual style gallery — shipped (A+1).**
 
-Flow after script: `video_style` → `edit_mode` (quick|detail) → render.
-`blog_clips.visual_style` drives Remotion layout/caption presets
-(`fullscreen|card_news|info_dark|bold_hook`). ASS subtitle templates remain
-for FFmpeg fallback only; quick mode no longer picks template chips.
+Flow after script: `edit_mode` → quick (`video_style` → voice/BGM) or detail
+(BoardEditor 스타일 탭). `blog_clips.visual_style` drives Remotion presets
+(`fullscreen|card_news|info_dark|bold_hook`).
 
 Prior: W5 wizard polish complete (`docs/WIZARD_DESIGN.md`).
 
@@ -112,21 +111,22 @@ Stages 17–24 APIs.
   clears `auto_bgm`
 - `pick_default_bgm(tone, length)` / `pick_default_sfx()` applied in
   `start_blog_clip_render` (SFX on boards after the first)
-- Flow (current): script → video_style → edit_mode → quick|detail → render
+- Flow (current): script → edit_mode → (quick: style→voice/BGM) | (detail: BoardEditor)
 - BoardEditor primary CTA is “편집 완료”; close → `ready`; render demoted to secondary
 
 #### W5 details: stepper polish + restore
 
 - DB: `blog_clips.wizard_step` (`video_style`\|`edit_mode`\|`quick`\|`ready`)
 - API: `PATCH /blog-clips/{id}/wizard-step`
-- `select-script` seeds `wizard_step = video_style`
-- Frontend stepper: 준비→이미지→대본→스타일→편집→완료
+- `select-script` seeds `wizard_step = edit_mode`
+- Frontend stepper: 준비→이미지→대본→편집→완료
 - Workroom row shows current wizard sub-step label
 
 #### Visual style details
 
 - DB: `blog_clips.visual_style` (default `fullscreen`)
 - `GET /visual-styles`, `PATCH /blog-clips/{id}/visual-style`
+- Quick: style screen after mode select; Detail: MediaPanel「스타일」탭
 - Remotion props: `visualStyle` + resolved `style{layout,caption,transitionSec,kenBurns}`
 - Out of scope: style packs with voice/BGM, custom styles, FFmpeg layout parity
 

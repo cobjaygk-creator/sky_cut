@@ -10,13 +10,16 @@ export function BoardEditor({
   blogClip,
   onClose,
   onRendered,
+  onClipUpdated,
   onMessage,
 }: {
   blogClip: BlogClip;
   onClose: () => void;
   onRendered: (updated: BlogClip) => void;
+  onClipUpdated?: (updated: BlogClip) => void;
   onMessage: (message: string) => void;
 }) {
+  const [clip, setClip] = useState(blogClip);
   const [boards, setBoards] = useState<Board[]>([]);
   const [imagePathPool, setImagePathPool] = useState<string[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState<number | null>(null);
@@ -31,8 +34,8 @@ export function BoardEditor({
   const [applyingStock, setApplyingStock] = useState(false);
   const [assigningSpeaker, setAssigningSpeaker] = useState(false);
   const [ttsSpeed, setTtsSpeed] = useState(blogClip.tts_speed ?? 1);
-  const [templateId, setTemplateId] = useState<number | null>(blogClip.subtitle_template_id ?? null);
-  const [applyingTemplate, setApplyingTemplate] = useState(false);
+  const [visualStyle, setVisualStyle] = useState(blogClip.visual_style || "fullscreen");
+  const [applyingVisualStyle, setApplyingVisualStyle] = useState(false);
   const [bgmAssetId, setBgmAssetId] = useState<number | null>(blogClip.bgm_asset_id ?? null);
   const [bgmVolume, setBgmVolume] = useState(blogClip.bgm_volume ?? 0.3);
   const [audioSaving, setAudioSaving] = useState(false);
@@ -70,12 +73,17 @@ export function BoardEditor({
   }
 
   useEffect(() => {
+    setClip(blogClip);
+    setVisualStyle(blogClip.visual_style || "fullscreen");
+  }, [blogClip]);
+
+  useEffect(() => {
     if (blogClip.status !== "awaiting_boards") {
       onClose();
       return;
     }
     setTtsSpeed(blogClip.tts_speed ?? 1);
-    setTemplateId(blogClip.subtitle_template_id ?? null);
+    setVisualStyle(blogClip.visual_style || "fullscreen");
     setBgmAssetId(blogClip.bgm_asset_id ?? null);
     setBgmVolume(blogClip.bgm_volume ?? 0.3);
     void loadBoards();
@@ -266,22 +274,24 @@ export function BoardEditor({
     }
   }
 
-  async function handleApplyTemplate(nextTemplateId: number) {
-    if (applyingTemplate) return;
-    setApplyingTemplate(true);
+  async function handleApplyVisualStyle(nextStyle: string) {
+    if (applyingVisualStyle) return;
+    setApplyingVisualStyle(true);
     setError("");
     try {
-      const updated = await authorizedRequest<BlogClip>(`/blog-clips/${blogClip.id}/template`, {
+      const updated = await authorizedRequest<BlogClip>(`/blog-clips/${blogClip.id}/visual-style`, {
         method: "PATCH",
-        body: JSON.stringify({ template_id: nextTemplateId }),
+        body: JSON.stringify({ visual_style: nextStyle }),
       });
-      setTemplateId(updated.subtitle_template_id);
-      onMessage("자막 템플릿을 이 프로젝트에 적용했습니다.");
+      setVisualStyle(updated.visual_style || nextStyle);
+      setClip(updated);
+      onClipUpdated?.(updated);
+      onMessage("영상 스타일을 적용했습니다.");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "템플릿 적용에 실패했습니다.");
+      setError(err instanceof Error ? err.message : "영상 스타일 적용에 실패했습니다.");
       throw err;
     } finally {
-      setApplyingTemplate(false);
+      setApplyingVisualStyle(false);
     }
   }
 
@@ -429,7 +439,7 @@ export function BoardEditor({
             adding={adding}
           />
           <RemotionPreviewPane
-            blogClip={blogClip}
+            blogClip={clip}
             boards={boards}
             selectedBoardId={selectedBoardId}
             draftText={draftText}
@@ -452,9 +462,10 @@ export function BoardEditor({
             onTtsSpeedChange={(speed) => void handleTtsSpeedChange(speed)}
             onAssignSpeaker={handleAssignSpeaker}
             assigningSpeaker={assigningSpeaker}
-            appliedTemplateId={templateId}
-            onApplyTemplate={handleApplyTemplate}
-            applyingTemplate={applyingTemplate}
+            appliedVisualStyle={visualStyle}
+            onApplyVisualStyle={handleApplyVisualStyle}
+            applyingVisualStyle={applyingVisualStyle}
+            onMessage={onMessage}
             bgmAssetId={bgmAssetId}
             bgmVolume={bgmVolume}
             onBgmChange={handleBgmChange}

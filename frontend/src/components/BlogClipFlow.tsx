@@ -18,7 +18,6 @@ const FLOW_STEPS = [
   { id: "progress", label: "준비" },
   { id: "images", label: "이미지" },
   { id: "script", label: "대본" },
-  { id: "style", label: "스타일" },
   { id: "edit", label: "편집" },
   { id: "done", label: "완료" },
 ] as const;
@@ -116,7 +115,7 @@ export function BlogClipFlow({
   const availableTones = SCRIPT_TONES.filter((tone) => Boolean(blogClip.script_candidates[tone]));
 
   const stepIndex = isFinalRender
-    ? 5
+    ? 4
     : isProgress
       ? 0
       : isAwaitingImages
@@ -124,15 +123,13 @@ export function BlogClipFlow({
         : isAwaitingScript
           ? 2
           : isAwaitingBoards
-            ? boardsStep === "video_style"
-              ? 3
-              : 4
+            ? 3
             : isCompleted || isFailed
-              ? 5
+              ? 4
               : 0;
 
   const stepperSteps = FLOW_STEPS.map((step, index) => {
-    if (index === 5 && isFinalRender) return { ...step, label: "렌더 중" };
+    if (index === 4 && isFinalRender) return { ...step, label: "렌더 중" };
     return step;
   });
 
@@ -144,14 +141,13 @@ export function BlogClipFlow({
 
   function handleStepperClick(index: number) {
     if (!isAwaitingBoards) return;
-    if (index === 3) goToBoardsStep("video_style");
-    else if (index === 4) goToBoardsStep("edit_mode");
+    if (index === 3) goToBoardsStep("edit_mode");
   }
 
-  async function handleVisualStyleSelect(style: VisualStyleSlug | string) {
+  async function handleQuickVisualStyleSelect(style: VisualStyleSlug | string) {
     await onApplyVisualStyle(blogClip, style);
-    setBoardsStep("edit_mode");
-    onWizardStepChange(blogClip, "edit_mode");
+    setBoardsStep("quick");
+    onWizardStepChange(blogClip, "quick");
   }
 
   return (
@@ -176,7 +172,7 @@ export function BlogClipFlow({
             {stepperSteps.map((step, index) => {
               const isCurrent = index === stepIndex;
               const isDone = index < stepIndex;
-              const canJump = isAwaitingBoards && (index === 3 || index === 4);
+              const canJump = isAwaitingBoards && index === 3;
               const className = `flow-stepper-item ${isCurrent ? "is-current" : ""} ${isDone ? "is-done" : ""} ${canJump ? "is-clickable" : ""}`;
               if (canJump) {
                 return (
@@ -263,28 +259,20 @@ export function BlogClipFlow({
             </section>
           ) : null}
 
-          {isAwaitingBoards && boardsStep === "video_style" ? (
-            <VideoStyleStep
-              blogClip={blogClip}
-              saving={savingVisualStyle}
-              onSelect={handleVisualStyleSelect}
-              onMessage={onMessage}
-            />
-          ) : null}
-
           {isAwaitingBoards && boardsStep === "edit_mode" ? (
             <section className="flow-card flow-boards-card">
               <p className="create-kicker">편집 모드</p>
               <h1>어떻게 만들까요?</h1>
-              <p className="flow-lead">보드를 직접 다듬거나, 기본값으로 빠르게 만들 수 있어요.</p>
+              <p className="flow-lead">
+                세부 편집에서는 편집기 안에서 스타일을 고르고, 퀵 모드는 선택 후 스타일·보이스를 순서대로 정합니다.
+              </p>
               <div className="highlight-meta">
                 <span>{boardCount ? `보드 ${boardCount}개` : "보드 준비됨"}</span>
                 <span>자막: {SUBTITLE_STYLE_LABELS[blogClip.subtitle_style as SubtitleStyle] ?? blogClip.subtitle_style}</span>
                 {blogClip.script_tone ? <span>톤: {SCRIPT_TONE_LABELS[blogClip.script_tone]}</span> : null}
-                {blogClip.visual_style ? <span>스타일: {blogClip.visual_style}</span> : null}
               </div>
               <div className="flow-step-actions">
-                <button className="ghost-button" type="button" onClick={() => goToBoardsStep("quick")}>
+                <button className="ghost-button" type="button" onClick={() => goToBoardsStep("video_style")}>
                   퀵 모드
                 </button>
                 <button className="cta-button flow-primary-cta" type="button" onClick={() => onOpenBoardEditor(blogClip)}>
@@ -294,6 +282,16 @@ export function BlogClipFlow({
             </section>
           ) : null}
 
+          {isAwaitingBoards && boardsStep === "video_style" ? (
+            <VideoStyleStep
+              blogClip={blogClip}
+              saving={savingVisualStyle}
+              onSelect={handleQuickVisualStyleSelect}
+              onBack={() => goToBoardsStep("edit_mode")}
+              onMessage={onMessage}
+            />
+          ) : null}
+
           {isAwaitingBoards && boardsStep === "quick" ? (
             <QuickSettingsStep
               blogClip={blogClip}
@@ -301,7 +299,7 @@ export function BlogClipFlow({
               busy={savingStyle || renderingFromFlow}
               onSaveDefaultVoice={(voiceId, ttsSpeed) => onSaveDefaultVoice(blogClip, voiceId, ttsSpeed)}
               onAudioSettings={(body) => onAudioSettings(blogClip, body)}
-              onBack={() => goToBoardsStep("edit_mode")}
+              onBack={() => goToBoardsStep("video_style")}
               onRender={() => onRender(blogClip)}
               onMessage={onMessage}
             />
