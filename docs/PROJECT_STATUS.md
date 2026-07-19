@@ -1,22 +1,25 @@
 # Project Status
 
-Last updated: 2026-07-16
+Last updated: 2026-07-20
 Project root: `C:\Users\stkim\Documents\Codex\new_cut` (branch `sky_cut` — see
 "Branching" below)
 
 ## Current Stage
 
-**Visual style gallery — shipped (A+1).**
+**Blog shorts product polish — in progress.**
 
-Flow after script: `edit_mode` → quick (`video_style` → voice/BGM) or detail
-(BoardEditor 스타일 탭). `blog_clips.visual_style` drives Remotion presets
-(`fullscreen|card_news|info_dark|bold_hook`).
+Shipped on top of W5:
+- Edit-mode fork: quick (`video_style` → voice/BGM) or detail (BoardEditor)
+- Visual styles: `fullscreen|card_news|info_dark|bold_hook`
+- Editable template header: `style_title` / `style_subtitle` → Remotion headers
+- **Render engine:** Remotion primary for blog shorts; FFmpeg remains fallback
+  (and the video-clipping pipeline)
 
 Prior: W5 wizard polish complete (`docs/WIZARD_DESIGN.md`).
 
 All 13 planned stages of the original local MVP are implemented, plus twelve
-follow-up stages on the blog-clip pipeline (Stage 25 is docs-only — no
-render-engine swap):
+follow-up stages on the blog-clip pipeline. Stage 25 eval originally deferred
+Remotion; code later adopted Remotion as the blog-shorts primary path:
 
 ```text
 Stage  0  Architecture/folder plan (no code)
@@ -62,8 +65,9 @@ Stage 23  BGM/SFX library + FFmpeg amix into blog render. See "Stage 23
           details" below.
 Stage 24  Multi-variant versions: multiple outputs per blog_clip with list /
           download / per-version metadata. See "Stage 24 details" below.
-Stage 25  Remotion vs FFmpeg evaluation (docs only): defer Remotion; keep
-          FFmpeg. See "Stage 25 details" below and `docs/REMOTION_EVAL.md`.
+Stage 25  Remotion vs FFmpeg evaluation (docs): initially deferred Remotion.
+          Later: Remotion adopted as blog-shorts primary; FFmpeg fallback.
+          See "Stage 25 details" below and `docs/REMOTION_EVAL.md`.
 ```
 
 ### Wizard (post–Stage 25)
@@ -124,13 +128,25 @@ Stages 17–24 APIs.
 
 #### Visual style details
 
-- DB: `blog_clips.visual_style` (default `fullscreen`)
-- `GET /visual-styles`, `PATCH /blog-clips/{id}/visual-style`
+- DB: `blog_clips.visual_style` (default `fullscreen`),
+  `style_title`, `style_subtitle`
+- `GET /visual-styles`, `PATCH /blog-clips/{id}/visual-style`,
+  `PATCH /blog-clips/{id}/style-copy`
 - Quick: style screen after mode select; Detail: MediaPanel「스타일」탭
-- Remotion props: `visualStyle` + resolved `style{layout,caption,transitionSec,kenBurns}`
+- Remotion props: `visualStyle`, `styleTitle`, `styleSubtitle`,
+  resolved `style{layout,caption,header,accent,transitionSec,kenBurns}`
 - Out of scope: style packs with voice/BGM, custom styles, FFmpeg layout parity
 
-Out of scope still: credits UI, my-voice, intro board.
+### Remaining backlog (2026-07-20)
+
+**P1 UX:** progress bar “alive” feel; voice default/empty-selection copy;
+style preview fidelity.
+
+**P2 style:** transition type/duration UI; full style packs; custom templates;
+per-word accent colors in titles.
+
+**P3 product/ops:** credits UI, my-voice, intro board; Stage 9 clip
+list/preview; pytest; deploy/multi-user (`DEPLOYMENT.md`).
 
 ## Branching
 
@@ -142,32 +158,22 @@ Out of scope still: credits UI, my-voice, intro board.
 - `sky_cut` — active development branch (this folder). All Stage 15+ roadmap
   work happens here. Merge back to `main` only when explicitly decided.
 
-### Stage 25 details: Remotion evaluation (deferred)
+### Stage 25 details: Remotion evaluation → later adoption
 
-Stage 25 was always conditional: re-evaluate FFmpeg vs a Remotion
-microservice only if caption animation / motion needs outgrew the filtergraph
-model. This stage is **investigation only** — no Remotion service, no Player
-embed, no replacement of `ffmpeg_service.py`.
+Stage 25 started as investigation-only (`docs/REMOTION_EVAL.md`) and initially
+**deferred** Remotion.
 
-**Decision: defer Remotion.** Full write-up: `docs/REMOTION_EVAL.md`.
+**Current decision (supersedes the deferral for blog shorts):** Remotion is
+the **primary** blog-shorts render path (composition + Player preview).
+FFmpeg remains **fallback** for blog shorts and continues to power the
+original video-clipping pipeline.
 
-Summary:
+Implications:
 
-1. **FFmpeg UX gaps that still matter:** kinetic/word-level captions, rich
-   multi-layer scene layouts, true WYSIWYG motion preview. Crossfades and
-   simpler polish remain FFmpeg-reachable (`xfade`, ASS template tweaks).
-2. **Remotion cost:** second Node/Chromium runtime, queueing/RAM ops, dual
-   template model (ASS vs React comps), weeks of parity work for templates /
-   multi-voice / BGM / versions — high fixed cost for this Python-first repo.
-3. **Why defer now:** Stages 20–23 already cover Ken Burns, templates, and
-   mix; no customer-backed expressiveness wall; opportunity cost favors
-   queue/tests/scrape/upload/`xfade` polish first.
-4. **Revisit when:** kinetic captions or layout packs are demanded *and*
-   FFmpeg attempts fail, or WYSIWYG preview must match final pixels, with
-   capacity to own a Node render path (see §4 in `REMOTION_EVAL.md`).
-
-Not in scope for Stage 25: implementing Remotion, Lambda, or any render
-swap.
+1. Visual styles / headers / transitions target Remotion first.
+2. ASS `subtitle_templates` still matter for FFmpeg fallback, not as the
+   main Remotion look.
+3. Full FFmpeg layout parity with Remotion styles is explicitly out of scope.
 
 ### Stage 24 details: multi-variant versions
 
@@ -794,21 +800,13 @@ between "runs on my PC" and "runs as a real hosted service."
 
 ## Recommended Next Steps
 
-1. Install FFmpeg and set a real `OPENAI_API_KEY` locally, then do one real
-   end-to-end run with a short test video to confirm the full pipeline
-   produces a correct, watchable output file (both the video-clipping
-   pipeline and the blog-clip pipeline).
-2. Decide whether to implement the missing `GET /clips` (list) and
-   `GET /clips/{clip_id}/preview` endpoints, or intentionally drop them from
-   scope.
-3. Add automated tests (even a small pytest suite around the service layer)
-   so future stages don't reintroduce regressions like the register bug
-   found in the Stage 13 review.
-4. When ready to support more than one concurrent real user, read
-   `docs/DEPLOYMENT.md` and plan the database/storage/queueing migration
-   before adding a payment provider.
-5. Blog-clip Stages 15–25 and wizard **W1–W5** are done. Next work is
-   product polish outside the wizard (tests, deploy, optional Stage 9 gaps).
+1. P1 UX: progress bar liveness; voice empty-selection behavior/copy.
+2. Keep end-to-end blog-shorts Remotion renders verified after style changes
+   (Typecast/OpenAI TTS + BGM path).
+3. Add automated tests (pytest around blog/remotion props services).
+4. Decide Stage 9 gaps: `GET /clips` list + preview, or drop from scope.
+5. When multi-user hosting matters: `docs/DEPLOYMENT.md` (DB/storage/queue)
+   before payments/credits.
 
 ## Roadmap: Blog Clips -> SuperShorts-Level Product
 
@@ -848,8 +846,8 @@ Stage 23  DONE. BGM/SFX library + FFmpeg amix into blog render. See
 Stage 24  DONE. Multi-variant versions: multiple outputs per blog_clip
           (tone variants / board regenerate), list/download/metadata,
           active version. See "Stage 24 details" above.
-Stage 25  DONE (eval only). Remotion deferred — keep FFmpeg. See
-          "Stage 25 details" above and `docs/REMOTION_EVAL.md`.
+Stage 25  DONE (eval → later adoption). Remotion is blog-shorts primary;
+          FFmpeg fallback. See "Stage 25 details" above.
 
 Wizard (see docs/WIZARD_DESIGN.md):
 W1        DONE. Create options: target_length, narration_language + UI
@@ -857,6 +855,7 @@ W2        DONE. Image candidates + awaiting_images select step
 W3        DONE. Pre-render voice step + default-voice API
 W4        DONE. Style/audio step: auto_bgm / auto_sfx + template picker
 W5        DONE. Stepper polish + wizard_step restore from workroom
+Visual    DONE. Style gallery + editable style_title/style_subtitle headers
 ```
 
 Decisions already made (do not re-litigate these without a new reason):
@@ -865,10 +864,8 @@ Decisions already made (do not re-litigate these without a new reason):
   the existing `videos`/`clips`/`blog_clips` tables — not a separate project.
   The existing auth/plan/usage/OpenAI/FFmpeg service layers are reused, not
   rebuilt.
-- **FFmpeg first; Remotion deferred after Stage 25 evaluation.** Remotion is
-  not scheduled. Re-open only when the revisit triggers in
-  `docs/REMOTION_EVAL.md` §4 are met (kinetic captions / layout packs with
-  evidence, FFmpeg ceiling, WYSIWYG preview requirement, ops capacity).
+- **Blog shorts: Remotion primary, FFmpeg fallback.** Video-clipping pipeline
+  stays FFmpeg. Do not chase full FFmpeg layout parity with Remotion styles.
 - **UI should match SuperShorts' UX patterns/information architecture (step
   wizard, board list, tabbed media/voice/audio panel), not its visual
   identity.** Copying layout structure is fine; copying specific icons,
